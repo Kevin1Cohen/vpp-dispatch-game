@@ -1,0 +1,189 @@
+{
+  "version": "1.0.0",
+  "description": "Canonical taxonomy of Virtual Power Plant dispatch strategies. This taxonomy separates decision mechanics, objectives, asset selection policies, and risk posture to enable composable, auditable dispatch behavior.",
+  "levels": {
+    "decision_framework": {
+      "description": "How dispatch decisions are computed over time.",
+      "types": {
+        "deterministic_policy": {
+          "description": "Fixed or state-dependent rules. Predictable and auditable.",
+          "subtypes": {
+            "static_priority": "Fixed ordering of assets",
+            "threshold_triggered": "Dispatch when signals cross thresholds",
+            "state_machine": "State-dependent rules across event phases",
+            "scenario_tree": "Pre-defined contingency branches"
+          }
+        },
+        "greedy_myopic": {
+          "description": "Optimizes immediate objective without long-horizon planning.",
+          "subtypes": {
+            "max_capacity_now": "Maximize kW in current interval",
+            "min_risk_now": "Minimize immediate drop-off probability",
+            "best_efficiency_now": "Maximize kW per unit of estimated cost"
+          }
+        },
+        "stochastic": {
+          "description": "Explicitly models uncertainty and expected distributions.",
+          "subtypes": {
+            "expected_value": "Optimize expected performance",
+            "chance_constrained": "Meet constraints with high probability",
+            "monte_carlo_weighted": "Simulation-based decision weighting"
+          }
+        },
+        "feedback_control": {
+          "description": "Closed-loop control using real-time error correction.",
+          "subtypes": {
+            "error_correction": "Adjust dispatch based on deviation from target",
+            "adaptive_weighting": "Continuously reweight assets by performance",
+            "pid_like_control": "Control-theoretic response for fast assets"
+          }
+        }
+      }
+    },
+    "objective_function": {
+      "description": "What the strategy is optimizing for.",
+      "types": {
+        "capacity": {
+          "description": "Maximize probability of meeting MW obligation.",
+          "metrics": [
+            "delivered_kw",
+            "interval_hit_rate"
+          ]
+        },
+        "risk_minimization": {
+          "description": "Minimize variance and probability of failure.",
+          "metrics": [
+            "variance_kw",
+            "dropoff_rate",
+            "p_fail"
+          ]
+        },
+        "efficiency": {
+          "description": "Maximize value per unit of customer or asset cost.",
+          "metrics": [
+            "kw_per_soc",
+            "kw_per_comfort_minute"
+          ]
+        },
+        "regret_minimization": {
+          "description": "Avoid worst-case or reputationally damaging outcomes.",
+          "metrics": [
+            "comfort_violations",
+            "mid_event_failures"
+          ]
+        },
+        "learning_oriented": {
+          "description": "Improve future dispatch by reducing uncertainty.",
+          "metrics": [
+            "uncertainty_reduction",
+            "model_error_delta"
+          ]
+        }
+      }
+    },
+    "selection_and_ordering": {
+      "description": "How assets are selected and ordered for dispatch.",
+      "categories": {
+        "asset_type_based": {
+          "examples": [
+            "batteries_first",
+            "hvac_first",
+            "high_load_reduction_first",
+            "balanced_weighting"
+          ]
+        },
+        "performance_based": {
+          "examples": [
+            "highest_trust_score",
+            "lowest_variance",
+            "best_historical_delivery"
+          ]
+        },
+        "state_based": {
+          "examples": [
+            "highest_headroom",
+            "lowest_marginal_comfort_cost",
+            "highest_soc_buffer"
+          ]
+        },
+        "fairness_based": {
+          "examples": [
+            "least_recently_dispatched",
+            "round_robin",
+            "fatigue_balanced"
+          ]
+        }
+      }
+    },
+    "risk_posture": {
+      "description": "How aggressively the strategy trades risk for value.",
+      "types": {
+        "risk_averse": {
+          "description": "High reserves, conservative dispatch.",
+          "modifiers": [
+            "high_reserve_margin",
+            "early_dispatch"
+          ]
+        },
+        "neutral": {
+          "description": "Balanced risk and reward.",
+          "modifiers": [
+            "moderate_reserves"
+          ]
+        },
+        "opportunity_seeking": {
+          "description": "Calculated risk for higher upside.",
+          "modifiers": [
+            "lower_reserves",
+            "delayed_dispatch"
+          ]
+        },
+        "deadline_aware": {
+          "description": "Aggressiveness increases as time remaining shrinks.",
+          "modifiers": [
+            "time_weighted_penalties"
+          ]
+        }
+      }
+    },
+    "constraints": {
+      "description": "Hard and soft limits that dispatch must respect.",
+      "types": {
+        "hard": [
+          "soc_min",
+          "comfort_bounds",
+          "program_rules",
+          "telemetry_validity"
+        ],
+        "soft": [
+          "customer_fatigue",
+          "fairness_targets",
+          "battery_degradation_cost"
+        ]
+      }
+    },
+    "feedback_and_learning": {
+      "description": "How the system adapts during and after events.",
+      "types": {
+        "none": "No adaptation during event",
+        "closed_loop": {
+          "description": "Adjust dispatch based on observed performance.",
+          "signals": [
+            "error_kw",
+            "dropoff_events"
+          ]
+        },
+        "post_event_learning": {
+          "description": "Update models and trust scores after events.",
+          "outputs": [
+            "asset_reliability_update",
+            "forecast_bias_update"
+          ]
+        }
+      }
+    }
+  },
+  "composition_rule": {
+    "description": "A complete dispatch strategy is defined by selecting exactly one decision framework, one objective function, one or more selection policies, one risk posture, and zero or more constraints and feedback mechanisms."
+  }
+}
