@@ -23,6 +23,8 @@ import {
   RISK_POSTURE_PARAMS,
   RiskPostureParams,
   DEFAULT_STRATEGY_CONFIG,
+  DispatchIntensitySettings,
+  DEFAULT_DISPATCH_INTENSITY,
 } from './types';
 
 // ============================================
@@ -36,6 +38,9 @@ export interface StrategyContext {
   totalTimesteps: number;
   config: ScenarioConfig;
   strategyConfig: StrategyConfig;
+  // Dispatch intensity: per-asset-type control (0-100)
+  // Affects both dispatch priority and capacity utilization
+  dispatchIntensity: DispatchIntensitySettings;
   // Feedback from previous timestep
   previousAchievedKw: number | null;
   previouslyDispatchedAssetIds: Set<string>;
@@ -207,6 +212,7 @@ interface ScoredAsset {
 }
 
 // Calculate composite ordering score based on selection orderings
+// Dispatch intensity affects the score: higher intensity = higher priority for that asset type
 function calculateOrderingScore(
   asset: Asset,
   orderings: SelectionOrdering[],
@@ -215,6 +221,11 @@ function calculateOrderingScore(
   const riskParams = getRiskParams(context.strategyConfig.riskPosture);
   let totalScore = 0;
   let weightSum = 0;
+
+  // Get dispatch intensity for this asset type (0-100, normalized to 0-1)
+  const intensity = (context.dispatchIntensity[asset.type] ?? 50) / 100;
+  // Intensity multiplier: 0.5 at intensity=0, 1.0 at intensity=50, 1.5 at intensity=100
+  const intensityMultiplier = 0.5 + intensity;
 
   // Weight decreases for later orderings (primary has most influence)
   orderings.forEach((ordering, index) => {
@@ -289,7 +300,9 @@ function calculateOrderingScore(
     totalScore += orderScore * weight;
   });
 
-  return totalScore / weightSum;
+  // Apply intensity multiplier to final score
+  // This means higher intensity assets get dispatched earlier
+  return (totalScore / weightSum) * intensityMultiplier;
 }
 
 // Select and order assets for dispatch
@@ -559,8 +572,18 @@ function dispatchToTarget(
   for (const { asset, capacity } of assets) {
     if (remainingTarget <= 0) break;
 
-    const dispatchAmount = Math.min(capacity, remainingTarget);
-    const command = createDispatchCommand(asset, dispatchAmount, riskParams);
+    // Get intensity for this asset type (0-100)
+    const intensity = context.dispatchIntensity[asset.type] ?? 50;
+
+    // Intensity affects how much of the capacity we're willing to use
+    // At 0 intensity: use 50% of capacity max
+    // At 50 intensity: use 100% of capacity
+    // At 100 intensity: use 100% of capacity (no boost, just priority)
+    const capacityMultiplier = 0.5 + (intensity / 100) * 0.5;
+    const effectiveCapacity = capacity * capacityMultiplier;
+
+    const dispatchAmount = Math.min(effectiveCapacity, remainingTarget);
+    const command = createDispatchCommand(asset, dispatchAmount, riskParams, intensity);
 
     if (command) {
       commands.push(command);
@@ -574,9 +597,17 @@ function dispatchToTarget(
 function createDispatchCommand(
   asset: Asset,
   targetKw: number,
-  riskParams: RiskPostureParams
+  riskParams: RiskPostureParams,
+  intensity: number = 50  // 0-100, default to 50
 ): DispatchCommand | null {
-  const conservationFactor = riskParams.conservationFactor;
+  // Combine risk posture conservation with intensity
+  // Higher intensity = less conservation (more aggressive)
+  // intensityFactor: 0 at intensity=0, 0.5 at intensity=50, 1 at intensity=100
+  const intensityFactor = intensity / 100;
+  // Effective conservation: multiply risk posture by inverse of intensity
+  // At intensity 100: conservation reduced by 50%
+  // At intensity 0: conservation increased by 50%
+  const conservationFactor = riskParams.conservationFactor * (1.5 - intensityFactor);
 
   switch (asset.type) {
     case 'battery_resi': {
@@ -593,8 +624,9 @@ function createDispatchCommand(
 
     case 'hvac_resi': {
       const hvac = asset as HvacResi;
-      // Map target to setpoint shift (0-2 degrees based on aggressiveness)
-      const maxShift = 2 * (1 - conservationFactor * 0.5);
+      // Map target to setpoint shift (0-3 degrees based on intensity)
+      // Higher intensity = larger max shift
+      const maxShift = (1 + intensityFactor * 2) * (1 - conservationFactor * 0.3);
       const shift = hvac.params.mode === 'cooling'
         ? Math.min(maxShift, targetKw / hvac.params.hvac_kw * 2)
         : -Math.min(maxShift, targetKw / hvac.params.hvac_kw * 2);
@@ -608,7 +640,9 @@ function createDispatchCommand(
       const ev = asset as EvResi;
       if (!ev.state.plugged || ev.state.override_active) return null;
       // Reduce charging rate to shift load
-      const reduction = Math.min(ev.params.p_max_kw, targetKw);
+      // Higher intensity = willing to reduce more
+      const maxReduction = ev.params.p_max_kw * (0.5 + intensityFactor * 0.5);
+      const reduction = Math.min(maxReduction, targetKw);
       const newChargeRate = ev.params.p_max_kw - reduction;
       return {
         asset_id: asset.id,
@@ -619,7 +653,9 @@ function createDispatchCommand(
     case 'fleet_site': {
       const fleet = asset as FleetSite;
       // Cap site power to reduce load
-      const reduction = Math.min(fleet.params.u_site_max_kw * 0.7, targetKw);
+      // Higher intensity = willing to cap more aggressively
+      const maxReduction = fleet.params.u_site_max_kw * (0.4 + intensityFactor * 0.4);
+      const reduction = Math.min(maxReduction, targetKw);
       const capPower = fleet.params.u_site_max_kw - reduction;
       return {
         asset_id: asset.id,
@@ -632,7 +668,8 @@ function createDispatchCommand(
       const availableHvac = ci.params.smax_hvac_kw * Math.exp(-ci.params.fatigue_k * ci.state.fatigue);
       const shedAmount = Math.min(availableHvac, targetKw) * (1 - conservationFactor * 0.3);
       const remainingForProcess = targetKw - shedAmount;
-      const curtailProcess = remainingForProcess > 0 && ci.state.process_on && conservationFactor < 0.5;
+      // Higher intensity = more willing to curtail process
+      const curtailProcess = remainingForProcess > 0 && ci.state.process_on && intensityFactor > 0.4;
       return {
         asset_id: asset.id,
         command: {
@@ -779,7 +816,8 @@ export function createDefaultStrategyContext(
   currentTimestep: number,
   totalTimesteps: number,
   config: ScenarioConfig,
-  strategyConfig: StrategyConfig = DEFAULT_STRATEGY_CONFIG
+  strategyConfig: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+  dispatchIntensity: DispatchIntensitySettings = DEFAULT_DISPATCH_INTENSITY
 ): StrategyContext {
   return {
     assets,
@@ -788,6 +826,7 @@ export function createDefaultStrategyContext(
     totalTimesteps,
     config,
     strategyConfig,
+    dispatchIntensity,
     previousAchievedKw: null,
     previouslyDispatchedAssetIds: new Set(),
     accumulatedError: 0,
