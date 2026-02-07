@@ -434,16 +434,22 @@ export type GreedySubStrategy = 'max_capacity' | 'lowest_risk' | 'efficiency_opt
 export type StochasticSubStrategy = 'risk_averse' | 'opportunity_seeking' | 'deadline_aware';
 export type SubStrategy = RuleBasedSubStrategy | GreedySubStrategy | StochasticSubStrategy;
 
-// Legacy aggressiveness (replaced by RiskPosture + selection orderings)
-export interface AggressivenessSettings {
-  hvac_resi: number;
-  battery_resi: number;
-  ev_resi: number;
-  fleet_site: number;
-  ci_building: number;
+// Dispatch Intensity: Per-asset-type real-time control
+// Controls both dispatch priority (higher = dispatched earlier) and
+// capacity utilization (higher = request more kW from each asset)
+// Multiplies with Risk Posture for combined effect
+export interface DispatchIntensitySettings {
+  hvac_resi: number;      // 0-100
+  battery_resi: number;   // 0-100
+  ev_resi: number;        // 0-100
+  fleet_site: number;     // 0-100
+  ci_building: number;    // 0-100
 }
 
-export const DEFAULT_AGGRESSIVENESS: AggressivenessSettings = {
+// Legacy alias for backward compatibility
+export type AggressivenessSettings = DispatchIntensitySettings;
+
+export const DEFAULT_DISPATCH_INTENSITY: DispatchIntensitySettings = {
   hvac_resi: 50,
   battery_resi: 50,
   ev_resi: 50,
@@ -451,16 +457,110 @@ export const DEFAULT_AGGRESSIVENESS: AggressivenessSettings = {
   ci_building: 50,
 };
 
+// Legacy alias
+export const DEFAULT_AGGRESSIVENESS = DEFAULT_DISPATCH_INTENSITY;
+
+// Get default dispatch intensity based on strategy configuration
+// This maps the strategy selections from setup screen to sensible defaults
+export function getDefaultIntensityForStrategy(config: StrategyConfig): DispatchIntensitySettings {
+  const base: DispatchIntensitySettings = {
+    hvac_resi: 50,
+    battery_resi: 50,
+    ev_resi: 50,
+    fleet_site: 50,
+    ci_building: 50,
+  };
+
+  // Adjust based on selection orderings (asset type preferences)
+  for (const ordering of config.selectionOrderings) {
+    switch (ordering) {
+      case 'batteries_first':
+        base.battery_resi = 75;
+        base.hvac_resi = 40;
+        base.ev_resi = 40;
+        break;
+      case 'hvac_first':
+        base.hvac_resi = 75;
+        base.battery_resi = 40;
+        break;
+      case 'high_load_reduction_first':
+        base.ev_resi = 75;
+        base.fleet_site = 75;
+        base.hvac_resi = 35;
+        break;
+      case 'balanced_weighting':
+        // Keep all at 50
+        break;
+    }
+  }
+
+  // Adjust based on risk posture (overall aggressiveness)
+  switch (config.riskPosture) {
+    case 'risk_averse':
+      // Scale all down by 20%
+      base.hvac_resi = Math.round(base.hvac_resi * 0.8);
+      base.battery_resi = Math.round(base.battery_resi * 0.8);
+      base.ev_resi = Math.round(base.ev_resi * 0.8);
+      base.fleet_site = Math.round(base.fleet_site * 0.8);
+      base.ci_building = Math.round(base.ci_building * 0.8);
+      break;
+    case 'opportunity_seeking':
+      // Scale all up by 20%
+      base.hvac_resi = Math.min(100, Math.round(base.hvac_resi * 1.2));
+      base.battery_resi = Math.min(100, Math.round(base.battery_resi * 1.2));
+      base.ev_resi = Math.min(100, Math.round(base.ev_resi * 1.2));
+      base.fleet_site = Math.min(100, Math.round(base.fleet_site * 1.2));
+      base.ci_building = Math.min(100, Math.round(base.ci_building * 1.2));
+      break;
+    case 'deadline_aware':
+      // Start lower, will increase during simulation
+      base.hvac_resi = Math.round(base.hvac_resi * 0.7);
+      base.battery_resi = Math.round(base.battery_resi * 0.7);
+      base.ev_resi = Math.round(base.ev_resi * 0.7);
+      base.fleet_site = Math.round(base.fleet_site * 0.7);
+      base.ci_building = Math.round(base.ci_building * 0.7);
+      break;
+    case 'neutral':
+    default:
+      // Keep as-is
+      break;
+  }
+
+  // Adjust based on objective function
+  switch (config.objective) {
+    case 'efficiency':
+      // Favor batteries and EVs (more efficient)
+      base.battery_resi = Math.min(100, base.battery_resi + 10);
+      base.ev_resi = Math.min(100, base.ev_resi + 10);
+      break;
+    case 'risk_minimization':
+      // Favor batteries (most reliable)
+      base.battery_resi = Math.min(100, base.battery_resi + 15);
+      base.ev_resi = Math.max(20, base.ev_resi - 10);
+      break;
+    case 'regret_minimization':
+      // Conservative across the board
+      base.hvac_resi = Math.max(20, base.hvac_resi - 10);
+      base.ev_resi = Math.max(20, base.ev_resi - 10);
+      break;
+  }
+
+  return base;
+}
+
 // ---------- Game Config (Updated) ----------
 
 export interface GameConfig {
   difficulty: DifficultyLevel;
   // New composable strategy system
   strategyConfig: StrategyConfig;
+  // Dispatch intensity: per-asset-type real-time control (0-100)
+  // Affects both dispatch priority and capacity utilization
+  dispatchIntensity: DispatchIntensitySettings;
   // Legacy fields (deprecated but kept for compatibility)
   strategy: DispatchStrategy;
   subStrategy: SubStrategy;
-  aggressiveness: AggressivenessSettings;
+  aggressiveness: AggressivenessSettings; // Alias for dispatchIntensity
   // Asset configuration
   asset_types: AssetType[];
   asset_counts: Record<AssetType, number>;

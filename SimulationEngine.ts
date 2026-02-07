@@ -10,10 +10,10 @@ import {
   TimestepResult,
   DispatchStrategy,
   SubStrategy,
-  AggressivenessSettings,
+  DispatchIntensitySettings,
   AssetType,
   DispatchCommand,
-  DEFAULT_AGGRESSIVENESS,
+  DEFAULT_DISPATCH_INTENSITY,
   EnhancedFinalScore,
   AssetTypePerformance,
   ASSET_TYPE_INFO,
@@ -22,6 +22,7 @@ import {
   StrategyConfig,
   DEFAULT_STRATEGY_CONFIG,
   RiskPosture,
+  getDefaultIntensityForStrategy,
 } from './types';
 import { updateAsset } from './AssetModels';
 import { executeComposableStrategy, StrategyContext } from './DispatchStrategies';
@@ -31,6 +32,7 @@ import { executeComposableStrategy, StrategyContext } from './DispatchStrategies
 export class SimulationEngine {
   private state: SimulationState;
   private strategyConfig: StrategyConfig;
+  private dispatchIntensity: DispatchIntensitySettings;
   private difficulty: DifficultyLevel;
   private onUpdate: (state: SimulationState) => void;
   private onComplete: (state: SimulationState) => void;
@@ -47,9 +49,14 @@ export class SimulationEngine {
     strategyConfig: StrategyConfig,
     difficulty: DifficultyLevel,
     onUpdate: (state: SimulationState) => void,
-    onComplete: (state: SimulationState) => void
+    onComplete: (state: SimulationState) => void,
+    dispatchIntensity?: DispatchIntensitySettings
   ) {
     this.strategyConfig = { ...strategyConfig };
+    // Initialize dispatch intensity from provided settings or derive from strategy config
+    this.dispatchIntensity = dispatchIntensity
+      ? { ...dispatchIntensity }
+      : getDefaultIntensityForStrategy(strategyConfig);
     this.difficulty = difficulty;
     this.onUpdate = onUpdate;
     this.onComplete = onComplete;
@@ -94,7 +101,7 @@ export class SimulationEngine {
     this.speedMultiplier = Math.max(0.5, Math.min(10, multiplier));
   }
 
-  // Update risk posture (replaces old aggressiveness)
+  // Update risk posture
   updateRiskPosture(riskPosture: RiskPosture): void {
     this.strategyConfig.riskPosture = riskPosture;
   }
@@ -102,6 +109,21 @@ export class SimulationEngine {
   // Update entire strategy config
   updateStrategyConfig(config: Partial<StrategyConfig>): void {
     this.strategyConfig = { ...this.strategyConfig, ...config };
+  }
+
+  // Update dispatch intensity for a specific asset type (real-time control)
+  updateDispatchIntensity(assetType: AssetType, value: number): void {
+    this.dispatchIntensity[assetType] = Math.max(0, Math.min(100, value));
+  }
+
+  // Update all dispatch intensity settings
+  updateAllDispatchIntensity(settings: DispatchIntensitySettings): void {
+    this.dispatchIntensity = { ...settings };
+  }
+
+  // Get current dispatch intensity settings
+  getDispatchIntensity(): DispatchIntensitySettings {
+    return { ...this.dispatchIntensity };
   }
 
   reset(): void {
@@ -191,7 +213,7 @@ export class SimulationEngine {
       this.accumulatedError = Math.max(-targetKw * 5, Math.min(targetKw * 5, this.accumulatedError));
     }
 
-    // Execute composable dispatch strategy
+    // Execute composable dispatch strategy with current dispatch intensity
     const context: StrategyContext = {
       assets: this.state.assets,
       targetKw,
@@ -199,6 +221,7 @@ export class SimulationEngine {
       totalTimesteps: config.timesteps,
       config,
       strategyConfig: this.strategyConfig,
+      dispatchIntensity: this.dispatchIntensity,
       previousAchievedKw,
       previouslyDispatchedAssetIds: this.previouslyDispatchedAssets,
       accumulatedError: this.accumulatedError,
