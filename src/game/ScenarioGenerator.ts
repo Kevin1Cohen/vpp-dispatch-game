@@ -15,6 +15,7 @@ import {
   CiBuilding,
   DifficultyLevel,
   DIFFICULTY_PRESETS,
+  ASSET_AVG_KW,
   FleetVehicle,
   FleetVehicleState,
 } from './types';
@@ -121,47 +122,60 @@ function generateBatteryResi(id: string): BatteryResi {
 }
 
 function generateEvResi(id: string, timesteps: number): EvResi {
-  // Arrival/departure patterns from spec
+  // Arrival patterns: ~40% plugged in at start (increased from 27%)
+  // This gives EVs more time to participate in the event
   const arrivalPattern = Math.random();
   let tArrival: number;
-  if (arrivalPattern < 0.7) {
-    // 70% arrive 4-9pm (steps 0-60 assuming 5pm start)
-    tArrival = randomInt(0, Math.min(60, timesteps - 1));
-  } else if (arrivalPattern < 0.9) {
-    // 20% arrive 9am-3pm (before event, so at start)
+  if (arrivalPattern < 0.40) {
+    // ~40% already plugged in at event start (increased from 27%)
     tArrival = 0;
+  } else if (arrivalPattern < 0.70) {
+    // ~30% arrive during first quarter of event (reduced window)
+    tArrival = randomInt(1, Math.floor(timesteps * 0.25));
+  } else if (arrivalPattern < 0.88) {
+    // ~18% arrive during second quarter of event
+    tArrival = randomInt(Math.floor(timesteps * 0.25), Math.floor(timesteps * 0.5));
   } else {
-    // 10% random
-    tArrival = randomInt(0, Math.floor(timesteps * 0.5));
+    // ~12% arrive during second half (reduced from previous)
+    tArrival = randomInt(Math.floor(timesteps * 0.5), Math.floor(timesteps * 0.75));
   }
 
+  // Departure patterns: Most EVs stay plugged in throughout the event
   const departPattern = Math.random();
   let tDepart: number;
-  if (departPattern < 0.7) {
-    // 70% depart 6-9am next day (end of event or after)
+  if (departPattern < 0.88) {
+    // 88% stay until end of event (increased from 85%)
     tDepart = timesteps - 1;
-  } else if (departPattern < 0.9) {
-    // 20% depart 3-7pm same day
-    tDepart = randomInt(Math.max(tArrival + 12, timesteps - 48), timesteps - 1);
+  } else if (departPattern < 0.96) {
+    // 8% depart late in event
+    tDepart = randomInt(Math.max(tArrival + 12, Math.floor(timesteps * 0.8)), timesteps - 1);
   } else {
-    // 10% random
-    tDepart = randomInt(tArrival + 6, timesteps - 1);
+    // 4% depart mid-event (reduced from 5%)
+    tDepart = randomInt(Math.max(tArrival + 10, Math.floor(timesteps * 0.6)), timesteps - 1);
   }
 
-  // Energy needs
+  // Energy needs - REDUCED to give more flexibility before override triggers
+  // Typical DR events are 2-4 hours, so EVs shouldn't need massive amounts
   const needPattern = Math.random();
   let eReq: number;
-  if (needPattern < 0.3) {
-    eReq = randomBetween(4, 10);
-  } else if (needPattern < 0.8) {
-    eReq = randomBetween(10, 25);
+  if (needPattern < 0.40) {
+    // 40% need minimal energy (commute top-up) - increased from 30%
+    eReq = randomBetween(3, 8);
+  } else if (needPattern < 0.85) {
+    // 45% need moderate energy - reduced upper bound from 25 to 18
+    eReq = randomBetween(8, 18);
   } else {
-    eReq = randomBetween(25, 50);
+    // 15% need significant energy - reduced from 20%, upper bound from 50 to 30
+    eReq = randomBetween(18, 30);
   }
 
-  const isL2 = Math.random() > 0.3;
+  const isL2 = Math.random() > 0.25; // 75% L2 chargers (slightly increased)
   const pMax = isL2 ? randomChoice([6.6, 7.2, 9.6]) : 1.4;
   const capacity = randomBetween(50, 80);
+
+  // Start with higher initial charge (40-65% instead of 20-50%)
+  // This gives more buffer before needing to charge urgently
+  const initialCharge = randomBetween(capacity * 0.40, capacity * 0.65);
 
   return {
     id,
@@ -175,7 +189,7 @@ function generateEvResi(id: string, timesteps: number): EvResi {
       t_depart: tDepart,
     },
     state: {
-      e_kwh: randomBetween(capacity * 0.2, capacity * 0.5),
+      e_kwh: initialCharge,
       plugged: tArrival === 0,
       dropped: false,
       override_active: false,
@@ -277,10 +291,30 @@ export function generateScenario(config: ScenarioGeneratorConfig): Scenario {
     outdoor_temp_f: generateWeatherTimeSeries(timesteps, startHour, isCooling),
   };
 
-  // Distribute assets across selected types
-  const numTypes = config.assetTypes.length;
-  const baseCountPerType = Math.floor(preset.total_assets / numTypes);
+  // Calculate required capacity based on MW target and headroom
+  // target_mw * 1000 = target in kW
+  // headroom_multiplier determines how much extra capacity we need
+  const targetKw = preset.target_mw * 1000;
+  const requiredCapacityKw = targetKw * preset.headroom_multiplier;
 
+  // Asset type weights for realistic utility-scale distribution
+  // At utility scale, C&I and Fleet contribute more of the capacity
+  // but residential assets still dominate by count
+  const assetWeights: Record<AssetType, number> = {
+    hvac_resi: 35,      // 35% of capacity from residential HVAC
+    battery_resi: 20,   // 20% from home batteries
+    ev_resi: 15,        // 15% from residential EV
+    fleet_site: 15,     // 15% from fleet charging sites
+    ci_building: 15,    // 15% from C&I buildings
+  };
+
+  // Calculate total weight for selected asset types only
+  const selectedWeights = config.assetTypes.reduce(
+    (sum, type) => sum + assetWeights[type],
+    0
+  );
+
+  // Calculate asset counts based on required capacity and average kW per asset
   const assetCounts: Record<AssetType, number> = {
     hvac_resi: 0,
     battery_resi: 0,
@@ -289,12 +323,22 @@ export function generateScenario(config: ScenarioGeneratorConfig): Scenario {
     ci_building: 0,
   };
 
-  config.assetTypes.forEach((type, i) => {
+  config.assetTypes.forEach((type) => {
     if (config.assetCounts?.[type] !== undefined) {
       assetCounts[type] = config.assetCounts[type]!;
     } else {
-      // Add remainder to first type
-      assetCounts[type] = baseCountPerType + (i === 0 ? preset.total_assets % numTypes : 0);
+      // Calculate capacity this asset type should provide
+      const proportion = assetWeights[type] / selectedWeights;
+      const capacityForType = requiredCapacityKw * proportion;
+
+      // Calculate how many assets needed to reach that capacity
+      const avgKw = ASSET_AVG_KW[type];
+      let count = Math.ceil(capacityForType / avgKw);
+
+      // Ensure at least 1 asset of each selected type
+      count = Math.max(1, count);
+
+      assetCounts[type] = count;
     }
   });
 
@@ -331,9 +375,8 @@ export function generateScenario(config: ScenarioGeneratorConfig): Scenario {
     assets.push(generateCiBuilding(generateId('ci', assetIndex++)));
   }
 
-  // Calculate max theoretical capacity for target setting
-  const maxCapacity = calculateMaxCapacity(assets);
-  const targetKw = maxCapacity * preset.target_multiplier;
+  // Target is directly from difficulty preset (in MW, convert to kW)
+  const scenarioTargetKw = preset.target_mw * 1000;
 
   // Build scenario config
   const startTime = new Date();
@@ -345,7 +388,7 @@ export function generateScenario(config: ScenarioGeneratorConfig): Scenario {
     weather,
     objective: {
       type: 'kw_target',
-      target_kw: Math.round(targetKw),
+      target_kw: Math.round(scenarioTargetKw),
     },
     baseline_error: {
       sigma_bias: 0.03,

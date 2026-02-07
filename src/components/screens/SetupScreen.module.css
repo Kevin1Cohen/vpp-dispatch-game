@@ -100,8 +100,15 @@
 }
 
 .difficultyInfo {
-  font-size: 0.75rem;
-  color: #94a3b8;
+  font-size: 0.8rem;
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.difficultyDetail {
+  font-size: 0.65rem;
+  color: #64748b;
+  margin-top: 0.25rem;
 }
 
 .strategyButtons {
@@ -510,4 +517,227 @@
 
 .startButton:hover:not(:disabled) .arrow {
   transform: translateX(4px);
+}
+
+/* Collapsible Section Header */
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin-bottom: 1rem;
+}
+
+.sectionHeader:hover .sectionTitle {
+  color: #4ade80;
+}
+
+.sectionToggle {
+  color: #22c55e;
+  font-size: 0.875rem;
+  transition: transform 0.2s ease;
+}
+
+.sectionDescription {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+/* Objective Function Buttons */
+.objectiveButtons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.objectiveButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.875rem;
+  background: #1e293b;
+  border: 2px solid #334155;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.objectiveButton:hover {
+  border-color: #475569;
+}
+
+.objectiveButton.active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.objectiveName {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.objectiveDesc {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+/* Risk Posture Buttons */
+.riskButtons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.riskButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  padding: 0.875rem;
+  background: #1e293b;
+  border: 2px solid #334155;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.riskButton:hover {
+  border-color: #475569;
+}
+
+.riskButton.active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.riskName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.riskDesc {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.riskCharacteristics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.riskChar {
+  font-size: 0.6rem;
+  padding: 0.15rem 0.4rem;
+  background: rgba(34, 197, 94, 0.15);
+  border-radius: 4px;
+  color: #4ade80;
+}
+
+/* Selection Categories */
+.selectionCategories {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.selectionCategory {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.categoryTitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  margin: 0 0 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.orderingButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.orderingButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem 0.625rem;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 0.75rem;
+  color: #cbd5e1;
+}
+
+.orderingButton:hover {
+  border-color: #475569;
+  background: #334155;
+}
+
+.orderingButton.active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.orderingRank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: #22c55e;
+  color: #0f172a;
+  border-radius: 50%;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.orderingName {
+  font-weight: 500;
+}
+
+.selectedOrderings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #334155;
+}
+
+.selectedLabel {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.selectedOrdering {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 4px;
+  color: #4ade80;
 }

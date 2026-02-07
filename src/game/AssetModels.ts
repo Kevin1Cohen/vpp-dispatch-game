@@ -170,6 +170,16 @@ export function updateBatteryResi(
 
 // ---------- EV Residential Model ----------
 
+// Override margin: How much buffer (as multiplier) before override triggers
+// 1.3 = need 30% more possible energy than required before feeling safe
+// Higher = more aggressive override (less flexibility for dispatch)
+// Lower = more relaxed, allows more dispatch but risks missing deadline
+const EV_OVERRIDE_MARGIN = 1.3; // Widened from 1.1 to give more dispatch flexibility
+
+// Recovery margin: How much extra buffer needed to recover from override
+// Once in override, need this much extra margin to exit
+const EV_RECOVERY_MARGIN = 1.5;
+
 export function updateEvResi(
   asset: EvResi,
   command: EvCommand | null,
@@ -197,20 +207,30 @@ export function updateEvResi(
     return { asset: { ...asset, state }, powerDelta: 0 };
   }
 
-  // Check deadline constraint
+  // Calculate deadline constraint
   const remainingSteps = params.t_depart - currentTimestep;
-  const remainingEnergy = params.e_req_kwh - state.e_kwh;
+  const remainingEnergy = Math.max(0, params.e_req_kwh - state.e_kwh);
   const maxPossibleEnergy = params.p_max_kw * remainingSteps * TIMESTEP_HOURS;
 
-  if (remainingEnergy > 0 && maxPossibleEnergy <= remainingEnergy * 1.1) {
-    // Deadline pressure -> override mode
-    state.override_active = true;
+  // Check if override should activate or deactivate
+  if (state.override_active) {
+    // RECOVERABLE OVERRIDE: If we've caught up enough, exit override mode
+    // Need more margin to recover than to enter (hysteresis prevents oscillation)
+    if (remainingEnergy <= 0 || maxPossibleEnergy >= remainingEnergy * EV_RECOVERY_MARGIN) {
+      state.override_active = false;
+    }
+  } else {
+    // Check if we need to enter override mode
+    // Widened margin (1.3x instead of 1.1x) gives more dispatch flexibility
+    if (remainingEnergy > 0 && maxPossibleEnergy <= remainingEnergy * EV_OVERRIDE_MARGIN) {
+      state.override_active = true;
+    }
   }
 
   let chargePower = params.p_max_kw; // Default baseline charge rate
 
   if (state.override_active) {
-    // Must charge at max rate
+    // Must charge at max rate to meet deadline
     chargePower = params.p_max_kw;
   } else if (command && !rollNoncompliance(config.noncompliance.probability)) {
     // Apply commanded charging rate

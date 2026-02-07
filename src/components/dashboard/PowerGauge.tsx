@@ -10,6 +10,16 @@ interface PowerGaugeProps {
   target: number;
 }
 
+// Helper to format kW as MW or GW
+function formatPower(kw: number): string {
+  if (kw >= 1000000) {
+    return `${(kw / 1000000).toFixed(2)} GW`;
+  } else if (kw >= 1000) {
+    return `${(kw / 1000).toFixed(1)} MW`;
+  }
+  return `${kw.toFixed(0)} kW`;
+}
+
 export function PowerGauge({ achieved, target }: PowerGaugeProps) {
   const percentage = target > 0 ? Math.min((achieved / target) * 100, 120) : 0;
   const displayPercentage = Math.min(percentage, 100);
@@ -70,13 +80,13 @@ export function PowerGauge({ achieved, target }: PowerGaugeProps) {
         <div className={styles.valueItem}>
           <span className={styles.valueLabel}>Achieved</span>
           <span className={styles.valueNumber} style={{ color }}>
-            {achieved.toFixed(0)} kW
+            {formatPower(achieved)}
           </span>
         </div>
         <div className={styles.valueDivider}>/</div>
         <div className={styles.valueItem}>
           <span className={styles.valueLabel}>Target</span>
-          <span className={styles.valueNumber}>{target.toFixed(0)} kW</span>
+          <span className={styles.valueNumber}>{formatPower(target)}</span>
         </div>
       </div>
     </div>

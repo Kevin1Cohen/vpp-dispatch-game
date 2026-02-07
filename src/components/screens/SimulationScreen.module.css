@@ -115,92 +115,85 @@
   transition: width 0.3s ease;
 }
 
-/* Dashboard */
+/* Dashboard - Simplified vertical layout */
 .dashboard {
   flex: 1;
-  display: grid;
-  grid-template-columns: 280px 1fr 350px;
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
   padding: 1.5rem 2rem;
-  overflow: hidden;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  overflow-y: auto;
 }
 
-@media (max-width: 1200px) {
-  .dashboard {
+/* Top row: Gauge/Performance stacked on left, Charts on right */
+.topRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+.leftStack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 240px;
+}
+
+@media (max-width: 900px) {
+  .topRow {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
   }
 
-  .leftColumn {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+  .leftStack {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }
 
-.leftColumn {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.centerColumn {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.rightColumn {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* Replay Mode Controls */
+/* Replay Mode Controls - embedded in chart container */
 .replayControls {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 12px;
-  padding: 1.25rem;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .replayInfo {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  text-align: center;
+  gap: 1rem;
 }
 
 .replayLabel {
-  font-size: 1rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: #a5b4fc;
 }
 
 .replayStats {
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   color: #94a3b8;
   font-family: 'JetBrains Mono', monospace;
 }
 
 .replayButtons {
   display: flex;
-  gap: 1rem;
-  justify-content: center;
+  gap: 0.75rem;
 }
 
 .replayButton {
-  padding: 0.75rem 1.5rem;
-  font-size: 0.95rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #e0e7ff;
   background: rgba(99, 102, 241, 0.2);
   border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -211,13 +204,13 @@
 }
 
 .newGameButton {
-  padding: 0.75rem 1.5rem;
-  font-size: 0.95rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #0f172a;
   background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 2px 10px rgba(34, 197, 94, 0.3);

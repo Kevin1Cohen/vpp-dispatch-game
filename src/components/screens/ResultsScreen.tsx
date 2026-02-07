@@ -1,14 +1,47 @@
 // ============================================
 // VPP Simulation Game - Results Screen
 // Enhanced end game summary with detailed metrics
+// Updated for Composable Strategy System
 // ============================================
 
 import { useGame } from '../../context/GameContext';
-import { STRATEGY_INFO } from '../../game/DispatchStrategies';
 import { calculateEnhancedFinalScore } from '../../game/SimulationEngine';
 import { generateResultsSummary } from '../../game/ResultsSummaryGenerator';
-import { ASSET_TYPE_INFO, getSubStrategiesForStrategy } from '../../game/types';
+import {
+  ASSET_TYPE_INFO,
+  DECISION_FRAMEWORK_INFO,
+  OBJECTIVE_FUNCTION_INFO,
+  RISK_POSTURE_INFO,
+  SELECTION_ORDERING_INFO,
+} from '../../game/types';
 import styles from './ResultsScreen.module.css';
+
+// Helper to format kW as MW or GW
+function formatPower(kw: number, includeSign: boolean = false): { value: string; unit: string } {
+  const absKw = Math.abs(kw);
+  const sign = includeSign && kw >= 0 ? '+' : '';
+  if (absKw >= 1000000) {
+    return { value: `${sign}${(kw / 1000000).toFixed(2)}`, unit: 'GW' };
+  } else if (absKw >= 1000) {
+    return { value: `${sign}${(kw / 1000).toFixed(1)}`, unit: 'MW' };
+  }
+  return { value: `${sign}${kw.toFixed(0)}`, unit: 'kW' };
+}
+
+// Helper to format kWh as MWh or GWh (energy)
+function formatEnergy(kwh: number): { value: string; unit: string } {
+  const absKwh = Math.abs(kwh);
+  if (absKwh >= 1000000) {
+    return { value: `${(kwh / 1000000).toFixed(2)}`, unit: 'GWh' };
+  } else if (absKwh >= 1000) {
+    return { value: `${(kwh / 1000).toFixed(1)}`, unit: 'MWh' };
+  }
+  return { value: `${kwh.toFixed(0)}`, unit: 'kWh' };
+}
+
+// Calculate total energy shifted in kWh from timestep data
+// Each timestep is 5 minutes = 5/60 hours
+const TIMESTEP_HOURS = 5 / 60;
 
 export function ResultsScreen() {
   const { state, playAgain, goToScreen } = useGame();
@@ -37,9 +70,20 @@ export function ResultsScreen() {
       ? '#eab308'
       : '#ef4444';
 
-  // Get sub-strategy name
-  const subStrategies = getSubStrategiesForStrategy(gameConfig.strategy);
-  const subStrategyName = subStrategies[gameConfig.subStrategy]?.name ?? gameConfig.subStrategy;
+  // Get strategy configuration display names
+  const strategyConfig = gameConfig.strategyConfig;
+  const frameworkInfo = DECISION_FRAMEWORK_INFO[strategyConfig.decisionFramework];
+  const frameworkSubtypeInfo = frameworkInfo.subtypes[strategyConfig.frameworkSubtype];
+  const objectiveInfo = OBJECTIVE_FUNCTION_INFO[strategyConfig.objective];
+  const riskInfo = RISK_POSTURE_INFO[strategyConfig.riskPosture];
+
+  // Calculate total energy shifted (kWh) from all timesteps
+  // Energy = sum of (achieved_kw * timestep_duration_in_hours)
+  const totalEnergyKwh = simulationState.history.reduce(
+    (sum, result) => sum + result.achieved_kw * TIMESTEP_HOURS,
+    0
+  );
+  const formattedEnergy = formatEnergy(totalEnergyKwh);
 
   return (
     <div className={styles.container}>
@@ -60,27 +104,30 @@ export function ResultsScreen() {
           <div className={styles.primaryStatCard}>
             <span className={styles.primaryStatIcon}>⚡</span>
             <div className={styles.primaryStatContent}>
-              <span className={styles.primaryStatValue}>
-                {enhancedScore.totalKwShifted.toLocaleString()}
-              </span>
-              <span className={styles.primaryStatUnit}>kW</span>
-              <span className={styles.primaryStatLabel}>Total Shifted</span>
+              <div className={styles.primaryStatValueRow}>
+                <span className={styles.primaryStatValue}>
+                  {formattedEnergy.value}
+                </span>
+                <span className={styles.primaryStatUnit}>{formattedEnergy.unit}</span>
+              </div>
+              <span className={styles.primaryStatLabel}>Energy Shifted</span>
             </div>
           </div>
 
           <div className={styles.primaryStatCard}>
             <span className={styles.primaryStatIcon}>🎯</span>
             <div className={styles.primaryStatContent}>
-              <span
-                className={styles.primaryStatValue}
-                style={{
-                  color: enhancedScore.avgKwVsTarget >= 0 ? '#22c55e' : '#ef4444',
-                }}
-              >
-                {enhancedScore.avgKwVsTarget >= 0 ? '+' : ''}
-                {enhancedScore.avgKwVsTarget.toFixed(1)}
-              </span>
-              <span className={styles.primaryStatUnit}>kW</span>
+              <div className={styles.primaryStatValueRow}>
+                <span
+                  className={styles.primaryStatValue}
+                  style={{
+                    color: enhancedScore.avgKwVsTarget >= 0 ? '#22c55e' : '#ef4444',
+                  }}
+                >
+                  {formatPower(enhancedScore.avgKwVsTarget, true).value}
+                </span>
+                <span className={styles.primaryStatUnit}>{formatPower(enhancedScore.avgKwVsTarget, true).unit}</span>
+              </div>
               <span className={styles.primaryStatLabel}>Avg vs Target/Step</span>
             </div>
           </div>
@@ -214,25 +261,38 @@ export function ResultsScreen() {
           </div>
         </div>
 
-        {/* Game Configuration */}
+        {/* Strategy Configuration */}
         <div className={styles.configSummary}>
-          <h3 className={styles.summaryTitle}>Game Configuration</h3>
-          <div className={styles.summaryItems}>
-            <div className={styles.summaryItem}>
-              <span className={styles.summaryLabel}>Difficulty</span>
-              <span className={styles.summaryValue}>
+          <h3 className={styles.summaryTitle}>Strategy Configuration</h3>
+          <div className={styles.strategyGrid}>
+            <div className={styles.strategyItem}>
+              <span className={styles.strategyLabel}>Difficulty</span>
+              <span className={styles.strategyValue}>
                 {gameConfig.difficulty.charAt(0).toUpperCase() + gameConfig.difficulty.slice(1)}
               </span>
             </div>
-            <div className={styles.summaryItem}>
-              <span className={styles.summaryLabel}>Strategy</span>
-              <span className={styles.summaryValue}>
-                {STRATEGY_INFO[gameConfig.strategy].name}
-              </span>
+            <div className={styles.strategyItem}>
+              <span className={styles.strategyLabel}>Framework</span>
+              <span className={styles.strategyValue}>{frameworkInfo.name}</span>
+              <span className={styles.strategySubValue}>{frameworkSubtypeInfo?.name || strategyConfig.frameworkSubtype}</span>
             </div>
-            <div className={styles.summaryItem}>
-              <span className={styles.summaryLabel}>Sub-Strategy</span>
-              <span className={styles.summaryValue}>{subStrategyName}</span>
+            <div className={styles.strategyItem}>
+              <span className={styles.strategyLabel}>Objective</span>
+              <span className={styles.strategyValue}>{objectiveInfo.name}</span>
+            </div>
+            <div className={styles.strategyItem}>
+              <span className={styles.strategyLabel}>Risk Posture</span>
+              <span className={styles.strategyValue}>{riskInfo.name}</span>
+            </div>
+            <div className={styles.strategyItem}>
+              <span className={styles.strategyLabel}>Asset Selection</span>
+              <div className={styles.orderingsList}>
+                {strategyConfig.selectionOrderings.map((ordering, i) => (
+                  <span key={ordering} className={styles.orderingItem}>
+                    {i + 1}. {SELECTION_ORDERING_INFO[ordering].name}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </div>

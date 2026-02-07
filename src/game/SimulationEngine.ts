@@ -10,47 +10,64 @@ import {
   TimestepResult,
   DispatchStrategy,
   SubStrategy,
-  AggressivenessSettings,
+  DispatchIntensitySettings,
   AssetType,
   DispatchCommand,
-  DEFAULT_AGGRESSIVENESS,
+  DEFAULT_DISPATCH_INTENSITY,
   EnhancedFinalScore,
   AssetTypePerformance,
   ASSET_TYPE_INFO,
+  DifficultyLevel,
+  DIFFICULTY_PRESETS,
+  StrategyConfig,
+  DEFAULT_STRATEGY_CONFIG,
+  RiskPosture,
+  getDefaultIntensityForStrategy,
 } from './types';
 import { updateAsset } from './AssetModels';
-import { executeStrategy, StrategyContext } from './DispatchStrategies';
+import { executeComposableStrategy, StrategyContext } from './DispatchStrategies';
 
 // ---------- Simulation Engine ----------
 
 export class SimulationEngine {
   private state: SimulationState;
-  private strategy: DispatchStrategy;
-  private subStrategy: SubStrategy;
-  private aggressiveness: AggressivenessSettings;
+  private strategyConfig: StrategyConfig;
+  private dispatchIntensity: DispatchIntensitySettings;
+  private difficulty: DifficultyLevel;
   private onUpdate: (state: SimulationState) => void;
   private onComplete: (state: SimulationState) => void;
   private animationFrameId: number | null = null;
   private lastUpdateTime: number = 0;
   private speedMultiplier: number = 1;
   private baseStepDuration: number = 1000; // 1 second per timestep at 1x
+  private previouslyDispatchedAssets: Set<string> = new Set(); // Track assets dispatched in previous timestep
+  private accumulatedError: number = 0; // For PID-like feedback control
+  private assetPerformanceScores: Map<string, number> = new Map(); // For adaptive weighting
 
   constructor(
     scenario: Scenario,
-    strategy: DispatchStrategy,
-    subStrategy: SubStrategy,
-    aggressiveness: AggressivenessSettings,
+    strategyConfig: StrategyConfig,
+    difficulty: DifficultyLevel,
     onUpdate: (state: SimulationState) => void,
-    onComplete: (state: SimulationState) => void
+    onComplete: (state: SimulationState) => void,
+    dispatchIntensity?: DispatchIntensitySettings
   ) {
-    this.strategy = strategy;
-    this.subStrategy = subStrategy;
-    this.aggressiveness = { ...aggressiveness };
+    this.strategyConfig = { ...strategyConfig };
+    // Initialize dispatch intensity from provided settings or derive from strategy config
+    this.dispatchIntensity = dispatchIntensity
+      ? { ...dispatchIntensity }
+      : getDefaultIntensityForStrategy(strategyConfig);
+    this.difficulty = difficulty;
     this.onUpdate = onUpdate;
     this.onComplete = onComplete;
 
     // Deep clone assets to avoid mutation
     const clonedAssets = JSON.parse(JSON.stringify(scenario.assets)) as Asset[];
+
+    // Initialize performance scores for all assets
+    for (const asset of clonedAssets) {
+      this.assetPerformanceScores.set(asset.id, 0.5); // Start at neutral
+    }
 
     this.state = {
       scenario,
@@ -84,20 +101,42 @@ export class SimulationEngine {
     this.speedMultiplier = Math.max(0.5, Math.min(10, multiplier));
   }
 
-  // Update single aggressiveness value (for mid-simulation adjustments)
-  updateAggressiveness(assetType: AssetType, value: number): void {
-    this.aggressiveness[assetType] = value;
+  // Update risk posture
+  updateRiskPosture(riskPosture: RiskPosture): void {
+    this.strategyConfig.riskPosture = riskPosture;
   }
 
-  // Update all aggressiveness values
-  updateAllAggressiveness(settings: AggressivenessSettings): void {
-    this.aggressiveness = { ...settings };
+  // Update entire strategy config
+  updateStrategyConfig(config: Partial<StrategyConfig>): void {
+    this.strategyConfig = { ...this.strategyConfig, ...config };
+  }
+
+  // Update dispatch intensity for a specific asset type (real-time control)
+  updateDispatchIntensity(assetType: AssetType, value: number): void {
+    this.dispatchIntensity[assetType] = Math.max(0, Math.min(100, value));
+  }
+
+  // Update all dispatch intensity settings
+  updateAllDispatchIntensity(settings: DispatchIntensitySettings): void {
+    this.dispatchIntensity = { ...settings };
+  }
+
+  // Get current dispatch intensity settings
+  getDispatchIntensity(): DispatchIntensitySettings {
+    return { ...this.dispatchIntensity };
   }
 
   reset(): void {
     this.pause();
     const scenario = this.state.scenario;
     const clonedAssets = JSON.parse(JSON.stringify(scenario.assets)) as Asset[];
+
+    // Reset performance scores
+    this.assetPerformanceScores.clear();
+    for (const asset of clonedAssets) {
+      this.assetPerformanceScores.set(asset.id, 0.5);
+    }
+
     this.state = {
       scenario,
       current_timestep: 0,
@@ -107,6 +146,8 @@ export class SimulationEngine {
       is_running: false,
       is_complete: false,
     };
+    this.previouslyDispatchedAssets = new Set(); // Clear previous dispatch tracking
+    this.accumulatedError = 0; // Reset accumulated error
     this.onUpdate(this.getState());
   }
 
@@ -158,23 +199,85 @@ export class SimulationEngine {
     const startDate = new Date(config.start_time);
     const startHour = startDate.getHours();
 
-    // Execute dispatch strategy with sub-strategy and aggressiveness
+    // Get previous achieved kW for feedback (null on first timestep)
+    const previousResult = this.state.history.length > 0
+      ? this.state.history[this.state.history.length - 1]
+      : null;
+    const previousAchievedKw = previousResult?.achieved_kw ?? null;
+
+    // Update accumulated error for PID control
+    if (previousAchievedKw !== null) {
+      const error = targetKw - previousAchievedKw;
+      this.accumulatedError += error;
+      // Clamp accumulated error to prevent windup
+      this.accumulatedError = Math.max(-targetKw * 5, Math.min(targetKw * 5, this.accumulatedError));
+    }
+
+    // Execute composable dispatch strategy with current dispatch intensity
     const context: StrategyContext = {
       assets: this.state.assets,
       targetKw,
       currentTimestep: timestep,
       totalTimesteps: config.timesteps,
       config,
-      subStrategy: this.subStrategy,
-      aggressiveness: this.aggressiveness,
+      strategyConfig: this.strategyConfig,
+      dispatchIntensity: this.dispatchIntensity,
+      previousAchievedKw,
+      previouslyDispatchedAssetIds: this.previouslyDispatchedAssets,
+      accumulatedError: this.accumulatedError,
+      assetPerformanceScores: this.assetPerformanceScores,
     };
-    const commands = executeStrategy(this.strategy, context);
+    const commands = executeComposableStrategy(context);
 
-    // Build command map
+    // Build asset map for fast lookup (needed for dispatch counting)
+    const assetMap = new Map<string, Asset>();
+    for (const asset of this.state.assets) {
+      assetMap.set(asset.id, asset);
+    }
+
+    // Build command map and count dispatches by asset type
     const commandMap = new Map<string, DispatchCommand>();
+    const dispatchesByType: Record<AssetType, number> = {
+      hvac_resi: 0,
+      battery_resi: 0,
+      ev_resi: 0,
+      fleet_site: 0,
+      ci_building: 0,
+    };
+    const newDispatchCalls: Record<AssetType, number> = {
+      hvac_resi: 0,
+      battery_resi: 0,
+      ev_resi: 0,
+      fleet_site: 0,
+      ci_building: 0,
+    };
+
+    // Track currently dispatched assets for next timestep comparison
+    const currentlyDispatchedAssets = new Set<string>();
+
     for (const cmd of commands) {
       commandMap.set(cmd.asset_id, cmd);
+      currentlyDispatchedAssets.add(cmd.asset_id);
+
+      // Use asset map for O(1) lookup instead of O(n) find
+      const asset = assetMap.get(cmd.asset_id);
+      if (asset) {
+        dispatchesByType[asset.type]++;
+
+        // Check if this is a NEW dispatch (wasn't dispatched in previous timestep)
+        if (!this.previouslyDispatchedAssets.has(cmd.asset_id)) {
+          newDispatchCalls[asset.type]++;
+        }
+      }
     }
+
+    // Update previous dispatches for next timestep
+    this.previouslyDispatchedAssets = currentlyDispatchedAssets;
+
+    // Get difficulty settings for response variability and penalty curve
+    const difficultySettings = DIFFICULTY_PRESETS[this.difficulty];
+    const responseVariability = difficultySettings.response_variability;
+    const penaltyExponent = difficultySettings.penalty_exponent;
 
     // Update all assets and calculate achieved kW
     let achievedKw = 0;
@@ -191,15 +294,47 @@ export class SimulationEngine {
         config
       );
       updatedAssets.push(result.asset);
-      achievedKw += result.powerDelta;
+
+      // Apply response variability - assets don't always deliver exactly what's expected
+      // Variability is a random multiplier: 1 ± (variability * random)
+      const variabilityFactor = 1 + (Math.random() * 2 - 1) * responseVariability;
+      achievedKw += result.powerDelta * variabilityFactor;
     }
 
     this.state.assets = updatedAssets;
 
-    // Calculate shortfall and penalty
+    // Update asset performance scores for adaptive weighting
+    // Assets that performed well (didn't drop) get higher scores
+    for (const asset of updatedAssets) {
+      const currentScore = this.assetPerformanceScores.get(asset.id) ?? 0.5;
+      const wasDispatched = currentlyDispatchedAssets.has(asset.id);
+
+      if (wasDispatched) {
+        if (asset.state.dropped) {
+          // Asset dropped - decrease score
+          this.assetPerformanceScores.set(asset.id, Math.max(0, currentScore - 0.1));
+        } else {
+          // Asset performed - increase score slightly
+          this.assetPerformanceScores.set(asset.id, Math.min(1, currentScore + 0.02));
+        }
+      }
+    }
+
+    // Calculate shortfall (for display) and penalty using difficulty-based exponent
+    // Penalty applies to both under AND over performance, but ASYMMETRICALLY:
+    // - Under-performance (missing target) is penalized at full rate
+    // - Over-performance is penalized at a reduced rate based on difficulty
+    // This mimics real-world operations where missing commitment is worse than exceeding it
     const shortfall = Math.max(0, targetKw - achievedKw);
+    const deviation = Math.abs(targetKw - achievedKw);
+    const isOverPerformance = achievedKw > targetKw;
+    const overPerformanceRatio = difficultySettings.over_performance_penalty_ratio;
     const epsilon = 0.001;
-    const penalty = Math.pow(shortfall / (targetKw + epsilon), 2);
+    const normalizedDeviation = deviation / (targetKw + epsilon);
+
+    // Apply asymmetric penalty: over-performance gets a reduced penalty
+    const basePenalty = Math.pow(normalizedDeviation, penaltyExponent);
+    const penalty = isOverPerformance ? basePenalty * overPerformanceRatio : basePenalty;
 
     // Count dropped assets
     const droppedCount = updatedAssets.filter(a => a.state.dropped).length;
@@ -218,6 +353,8 @@ export class SimulationEngine {
       penalty: Math.round(penalty * 10000) / 10000,
       assets_dropped: droppedCount,
       outdoor_temp_f: Math.round(outdoorTemp * 10) / 10,
+      dispatches_by_type: dispatchesByType,
+      new_dispatch_calls: newDispatchCalls,
     };
 
     this.state.history.push(result);

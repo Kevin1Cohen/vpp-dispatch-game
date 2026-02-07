@@ -255,31 +255,201 @@ export interface TimestepResult {
   penalty: number;
   assets_dropped: number;
   outdoor_temp_f: number;
+  dispatches_by_type: Record<AssetType, number>; // Total dispatch commands active per asset type
+  new_dispatch_calls: Record<AssetType, number>; // NEW dispatch calls made this timestep (not ongoing)
 }
 
 // ---------- Game Configuration ----------
 
 export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 
-export type DispatchStrategy = 'rule_based' | 'greedy' | 'stochastic';
+// ============================================
+// NEW STRATEGY TAXONOMY - Composable Dispatch System
+// ============================================
 
-// Sub-strategies for each top-level strategy
+// ---------- Decision Framework ----------
+// How dispatch decisions are computed over time
+
+export type DecisionFramework =
+  | 'deterministic_policy'
+  | 'greedy_myopic'
+  | 'stochastic'
+  | 'feedback_control';
+
+export type DeterministicSubtype =
+  | 'static_priority'      // Fixed ordering of assets
+  | 'threshold_triggered'  // Dispatch when signals cross thresholds
+  | 'state_machine'        // State-dependent rules across event phases
+  | 'scenario_tree';       // Pre-defined contingency branches
+
+export type GreedySubtype =
+  | 'max_capacity_now'     // Maximize kW in current interval
+  | 'min_risk_now'         // Minimize immediate drop-off probability
+  | 'best_efficiency_now'; // Maximize kW per unit of estimated cost
+
+export type StochasticSubtype =
+  | 'expected_value'       // Optimize expected performance
+  | 'chance_constrained'   // Meet constraints with high probability
+  | 'monte_carlo_weighted'; // Simulation-based decision weighting
+
+export type FeedbackSubtype =
+  | 'error_correction'     // Adjust dispatch based on deviation from target
+  | 'adaptive_weighting'   // Continuously reweight assets by performance
+  | 'pid_like_control';    // Control-theoretic response for fast assets
+
+export type FrameworkSubtype = DeterministicSubtype | GreedySubtype | StochasticSubtype | FeedbackSubtype;
+
+// ---------- Objective Function ----------
+// What the strategy is optimizing for
+
+export type ObjectiveFunction =
+  | 'capacity'             // Maximize probability of meeting MW obligation
+  | 'risk_minimization'    // Minimize variance and probability of failure
+  | 'efficiency'           // Maximize value per unit of customer/asset cost
+  | 'regret_minimization'  // Avoid worst-case or reputationally damaging outcomes
+  | 'learning_oriented';   // Improve future dispatch by reducing uncertainty
+
+// ---------- Selection and Ordering ----------
+// How assets are selected and ordered for dispatch
+
+export type SelectionCategory =
+  | 'asset_type_based'
+  | 'performance_based'
+  | 'state_based'
+  | 'fairness_based';
+
+export type AssetTypeOrdering =
+  | 'batteries_first'
+  | 'hvac_first'
+  | 'high_load_reduction_first'
+  | 'balanced_weighting';
+
+export type PerformanceOrdering =
+  | 'highest_trust_score'
+  | 'lowest_variance'
+  | 'best_historical_delivery';
+
+export type StateOrdering =
+  | 'highest_headroom'
+  | 'lowest_marginal_comfort_cost'
+  | 'highest_soc_buffer';
+
+export type FairnessOrdering =
+  | 'least_recently_dispatched'
+  | 'round_robin'
+  | 'fatigue_balanced';
+
+export type SelectionOrdering = AssetTypeOrdering | PerformanceOrdering | StateOrdering | FairnessOrdering;
+
+// ---------- Risk Posture ----------
+// How aggressively the strategy trades risk for value
+
+export type RiskPosture =
+  | 'risk_averse'          // High reserves, conservative dispatch
+  | 'neutral'              // Balanced risk and reward
+  | 'opportunity_seeking'  // Calculated risk for higher upside
+  | 'deadline_aware';      // Aggressiveness increases as time remaining shrinks
+
+// ---------- Feedback Mode ----------
+// How the system adapts during events
+
+export type FeedbackMode =
+  | 'none'                 // No adaptation during event
+  | 'closed_loop'          // Adjust dispatch based on observed performance
+  | 'post_event_learning'; // Update models after events (future use)
+
+// ---------- Composed Strategy Configuration ----------
+
+export interface StrategyConfig {
+  // Required: One decision framework
+  decisionFramework: DecisionFramework;
+  frameworkSubtype: FrameworkSubtype;
+
+  // Required: One objective function
+  objective: ObjectiveFunction;
+
+  // Required: One or more selection orderings (hybrid allowed)
+  selectionOrderings: SelectionOrdering[];
+
+  // Required: One risk posture
+  riskPosture: RiskPosture;
+
+  // Required: Feedback mode
+  feedbackMode: FeedbackMode;
+}
+
+// ---------- Risk Posture Parameters ----------
+// Numerical parameters derived from risk posture selection
+
+export interface RiskPostureParams {
+  reserveMargin: number;        // 0.1 to 0.5 - extra capacity to hold back
+  dispatchTiming: number;       // -1 to 1: negative = early, positive = delayed
+  rampUpSpeed: number;          // 0.3 to 0.8 - initial percentage of assets
+  conservationFactor: number;   // 0.2 to 0.8 - how conservative in uncertainty
+}
+
+export const RISK_POSTURE_PARAMS: Record<RiskPosture, RiskPostureParams> = {
+  risk_averse: {
+    reserveMargin: 0.4,
+    dispatchTiming: -0.5,    // Early dispatch
+    rampUpSpeed: 0.3,        // Start with 30%
+    conservationFactor: 0.7, // Very conservative
+  },
+  neutral: {
+    reserveMargin: 0.25,
+    dispatchTiming: 0,
+    rampUpSpeed: 0.5,        // Start with 50%
+    conservationFactor: 0.5,
+  },
+  opportunity_seeking: {
+    reserveMargin: 0.15,
+    dispatchTiming: 0.3,     // Slightly delayed
+    rampUpSpeed: 0.6,        // Start with 60%
+    conservationFactor: 0.3, // More aggressive
+  },
+  deadline_aware: {
+    reserveMargin: 0.35,     // Moderate reserves early
+    dispatchTiming: 0,       // Timing varies with event progress
+    rampUpSpeed: 0.25,       // Start conservative
+    conservationFactor: 0.6, // Starts conservative, becomes aggressive
+  },
+};
+
+// ---------- Default Strategy Configuration ----------
+
+export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
+  decisionFramework: 'feedback_control',
+  frameworkSubtype: 'error_correction',
+  objective: 'capacity',
+  selectionOrderings: ['balanced_weighting', 'highest_headroom'],
+  riskPosture: 'neutral',
+  feedbackMode: 'closed_loop',
+};
+
+// ---------- Legacy Types (kept for compatibility during transition) ----------
+
+export type DispatchStrategy = 'rule_based' | 'greedy' | 'stochastic';
 export type RuleBasedSubStrategy = 'batteries_first' | 'hvac_first' | 'load_reduction_first' | 'balanced';
 export type GreedySubStrategy = 'max_capacity' | 'lowest_risk' | 'efficiency_optimized';
 export type StochasticSubStrategy = 'risk_averse' | 'opportunity_seeking' | 'deadline_aware';
-
 export type SubStrategy = RuleBasedSubStrategy | GreedySubStrategy | StochasticSubStrategy;
 
-// Aggressiveness settings per asset type (0-100)
-export interface AggressivenessSettings {
-  hvac_resi: number;
-  battery_resi: number;
-  ev_resi: number;
-  fleet_site: number;
-  ci_building: number;
+// Dispatch Intensity: Per-asset-type real-time control
+// Controls both dispatch priority (higher = dispatched earlier) and
+// capacity utilization (higher = request more kW from each asset)
+// Multiplies with Risk Posture for combined effect
+export interface DispatchIntensitySettings {
+  hvac_resi: number;      // 0-100
+  battery_resi: number;   // 0-100
+  ev_resi: number;        // 0-100
+  fleet_site: number;     // 0-100
+  ci_building: number;    // 0-100
 }
 
-export const DEFAULT_AGGRESSIVENESS: AggressivenessSettings = {
+// Legacy alias for backward compatibility
+export type AggressivenessSettings = DispatchIntensitySettings;
+
+export const DEFAULT_DISPATCH_INTENSITY: DispatchIntensitySettings = {
   hvac_resi: 50,
   battery_resi: 50,
   ev_resi: 50,
@@ -287,11 +457,111 @@ export const DEFAULT_AGGRESSIVENESS: AggressivenessSettings = {
   ci_building: 50,
 };
 
+// Legacy alias
+export const DEFAULT_AGGRESSIVENESS = DEFAULT_DISPATCH_INTENSITY;
+
+// Get default dispatch intensity based on strategy configuration
+// This maps the strategy selections from setup screen to sensible defaults
+export function getDefaultIntensityForStrategy(config: StrategyConfig): DispatchIntensitySettings {
+  const base: DispatchIntensitySettings = {
+    hvac_resi: 50,
+    battery_resi: 50,
+    ev_resi: 50,
+    fleet_site: 50,
+    ci_building: 50,
+  };
+
+  // Adjust based on selection orderings (asset type preferences)
+  for (const ordering of config.selectionOrderings) {
+    switch (ordering) {
+      case 'batteries_first':
+        base.battery_resi = 75;
+        base.hvac_resi = 40;
+        base.ev_resi = 40;
+        break;
+      case 'hvac_first':
+        base.hvac_resi = 75;
+        base.battery_resi = 40;
+        break;
+      case 'high_load_reduction_first':
+        base.ev_resi = 75;
+        base.fleet_site = 75;
+        base.hvac_resi = 35;
+        break;
+      case 'balanced_weighting':
+        // Keep all at 50
+        break;
+    }
+  }
+
+  // Adjust based on risk posture (overall aggressiveness)
+  switch (config.riskPosture) {
+    case 'risk_averse':
+      // Scale all down by 20%
+      base.hvac_resi = Math.round(base.hvac_resi * 0.8);
+      base.battery_resi = Math.round(base.battery_resi * 0.8);
+      base.ev_resi = Math.round(base.ev_resi * 0.8);
+      base.fleet_site = Math.round(base.fleet_site * 0.8);
+      base.ci_building = Math.round(base.ci_building * 0.8);
+      break;
+    case 'opportunity_seeking':
+      // Scale all up by 20%
+      base.hvac_resi = Math.min(100, Math.round(base.hvac_resi * 1.2));
+      base.battery_resi = Math.min(100, Math.round(base.battery_resi * 1.2));
+      base.ev_resi = Math.min(100, Math.round(base.ev_resi * 1.2));
+      base.fleet_site = Math.min(100, Math.round(base.fleet_site * 1.2));
+      base.ci_building = Math.min(100, Math.round(base.ci_building * 1.2));
+      break;
+    case 'deadline_aware':
+      // Start lower, will increase during simulation
+      base.hvac_resi = Math.round(base.hvac_resi * 0.7);
+      base.battery_resi = Math.round(base.battery_resi * 0.7);
+      base.ev_resi = Math.round(base.ev_resi * 0.7);
+      base.fleet_site = Math.round(base.fleet_site * 0.7);
+      base.ci_building = Math.round(base.ci_building * 0.7);
+      break;
+    case 'neutral':
+    default:
+      // Keep as-is
+      break;
+  }
+
+  // Adjust based on objective function
+  switch (config.objective) {
+    case 'efficiency':
+      // Favor batteries and EVs (more efficient)
+      base.battery_resi = Math.min(100, base.battery_resi + 10);
+      base.ev_resi = Math.min(100, base.ev_resi + 10);
+      break;
+    case 'risk_minimization':
+      // Favor batteries (most reliable)
+      base.battery_resi = Math.min(100, base.battery_resi + 15);
+      base.ev_resi = Math.max(20, base.ev_resi - 10);
+      break;
+    case 'regret_minimization':
+      // Conservative across the board
+      base.hvac_resi = Math.max(20, base.hvac_resi - 10);
+      base.ev_resi = Math.max(20, base.ev_resi - 10);
+      break;
+  }
+
+  return base;
+}
+
+// ---------- Game Config (Updated) ----------
+
 export interface GameConfig {
   difficulty: DifficultyLevel;
+  // New composable strategy system
+  strategyConfig: StrategyConfig;
+  // Dispatch intensity: per-asset-type real-time control (0-100)
+  // Affects both dispatch priority and capacity utilization
+  dispatchIntensity: DispatchIntensitySettings;
+  // Legacy fields (deprecated but kept for compatibility)
   strategy: DispatchStrategy;
   subStrategy: SubStrategy;
-  aggressiveness: AggressivenessSettings;
+  aggressiveness: AggressivenessSettings; // Alias for dispatchIntensity
+  // Asset configuration
   asset_types: AssetType[];
   asset_counts: Record<AssetType, number>;
 }
@@ -301,29 +571,56 @@ export interface GameScreen {
 }
 
 // ---------- Difficulty Presets ----------
-// Asset counts are set to provide ~3x capacity vs target for strategic flexibility
-// target_multiplier determines what fraction of max capacity becomes the target
+// VPP targeting 5 MW (Easy) to 300 MW (Hard)
+// Difficulty is based on:
+// - target_mw: The MW target for the event
+// - noncompliance: Probability of random asset dropoffs
+// - response_variability: How unpredictable asset kW delivery is (0-1)
+// - headroom_multiplier: How much extra capacity vs target (for strategic flexibility)
+// - penalty_exponent: Steeper curve = harsher penalties for deviation
 
 export const DIFFICULTY_PRESETS: Record<DifficultyLevel, {
-  total_assets: number;
+  target_mw: number;
   noncompliance: number;
-  target_multiplier: number;
+  response_variability: number;
+  headroom_multiplier: number;
+  penalty_exponent: number;
+  over_performance_penalty_ratio: number;  // Ratio of over-performance penalty vs under-performance (0-1)
 }> = {
   easy: {
-    total_assets: 200,       // ~3x more assets for strategic choices
-    noncompliance: 0.05,
-    target_multiplier: 0.25, // Target = 25% of capacity (4x headroom)
+    target_mw: 5,               // 5 MW target
+    noncompliance: 0.05,        // 5% random dropoffs
+    response_variability: 0.1,  // Assets respond fairly predictably
+    headroom_multiplier: 4.0,   // 4x headroom (20 MW capacity for 5 MW target)
+    penalty_exponent: 1.5,      // Gentle penalty curve
+    over_performance_penalty_ratio: 0.3,  // Over-performance penalized at 30% of under (most forgiving)
   },
   medium: {
-    total_assets: 400,       // Larger portfolio
-    noncompliance: 0.10,
-    target_multiplier: 0.30, // Target = 30% of capacity (~3.3x headroom)
+    target_mw: 50,              // 50 MW target
+    noncompliance: 0.15,        // 15% random dropoffs
+    response_variability: 0.25, // Moderate unpredictability
+    headroom_multiplier: 2.5,   // 2.5x headroom (125 MW capacity for 50 MW target)
+    penalty_exponent: 2.0,      // Standard quadratic penalty
+    over_performance_penalty_ratio: 0.5,  // Over-performance penalized at 50% of under (mild asymmetry)
   },
   hard: {
-    total_assets: 600,       // Full-scale portfolio
-    noncompliance: 0.15,
-    target_multiplier: 0.33, // Target = 33% of capacity (3x headroom)
+    target_mw: 300,             // 300 MW target
+    noncompliance: 0.25,        // 25% random dropoffs
+    response_variability: 0.4,  // High unpredictability in responses
+    headroom_multiplier: 1.5,   // 1.5x headroom (450 MW capacity for 300 MW target)
+    penalty_exponent: 3.0,      // Steep penalty curve - every MW matters
+    over_performance_penalty_ratio: 0.7,  // Over-performance penalized at 70% of under (less forgiving)
   },
+};
+
+// ---------- Asset Type Capacity ----------
+// Realistic average kW contribution per asset type
+export const ASSET_AVG_KW: Record<AssetType, number> = {
+  hvac_resi: 4,       // 4 kW average residential HVAC
+  battery_resi: 5,    // 5 kW average home battery
+  ev_resi: 7,         // 7 kW average EV charger (L2)
+  fleet_site: 150,    // 150 kW average fleet charging site
+  ci_building: 200,   // 200 kW average C&I building load shed
 };
 
 // ---------- Asset Type Metadata ----------
@@ -360,7 +657,281 @@ export const ASSET_TYPE_INFO: Record<AssetType, {
   },
 };
 
-// ---------- Sub-Strategy Metadata ----------
+// ============================================
+// STRATEGY TAXONOMY METADATA
+// ============================================
+
+// ---------- Decision Framework Metadata ----------
+
+export const DECISION_FRAMEWORK_INFO: Record<DecisionFramework, {
+  name: string;
+  description: string;
+  subtypes: Record<string, { name: string; description: string }>;
+}> = {
+  deterministic_policy: {
+    name: 'Deterministic Policy',
+    description: 'Fixed or state-dependent rules. Predictable and auditable dispatch behavior.',
+    subtypes: {
+      static_priority: {
+        name: 'Static Priority',
+        description: 'Fixed ordering of assets by type or characteristics. Simple and predictable.',
+      },
+      threshold_triggered: {
+        name: 'Threshold Triggered',
+        description: 'Dispatch assets when performance signals cross defined thresholds.',
+      },
+      state_machine: {
+        name: 'State Machine',
+        description: 'Different dispatch rules for different event phases (ramp, sustain, recovery).',
+      },
+      scenario_tree: {
+        name: 'Scenario Tree',
+        description: 'Pre-defined contingency branches based on event conditions.',
+      },
+    },
+  },
+  greedy_myopic: {
+    name: 'Greedy/Myopic',
+    description: 'Optimizes immediate objective without long-horizon planning. Fast decisions.',
+    subtypes: {
+      max_capacity_now: {
+        name: 'Max Capacity Now',
+        description: 'Maximize kW delivery in the current interval regardless of future impact.',
+      },
+      min_risk_now: {
+        name: 'Min Risk Now',
+        description: 'Minimize immediate drop-off probability. Prioritize reliable assets.',
+      },
+      best_efficiency_now: {
+        name: 'Best Efficiency Now',
+        description: 'Maximize kW per unit of estimated customer/asset cost.',
+      },
+    },
+  },
+  stochastic: {
+    name: 'Stochastic',
+    description: 'Explicitly models uncertainty and expected distributions. Robust to variability.',
+    subtypes: {
+      expected_value: {
+        name: 'Expected Value',
+        description: 'Optimize expected (average) performance across simulated scenarios.',
+      },
+      chance_constrained: {
+        name: 'Chance Constrained',
+        description: 'Meet performance constraints with high probability (e.g., 95% confidence).',
+      },
+      monte_carlo_weighted: {
+        name: 'Monte Carlo Weighted',
+        description: 'Weight decisions by simulation results across many random samples.',
+      },
+    },
+  },
+  feedback_control: {
+    name: 'Feedback Control',
+    description: 'Closed-loop control using real-time error correction. Adaptive to actual performance.',
+    subtypes: {
+      error_correction: {
+        name: 'Error Correction',
+        description: 'Adjust dispatch based on deviation between target and achieved kW.',
+      },
+      adaptive_weighting: {
+        name: 'Adaptive Weighting',
+        description: 'Continuously reweight assets based on their real-time performance.',
+      },
+      pid_like_control: {
+        name: 'PID-like Control',
+        description: 'Control-theoretic response with proportional, integral, and derivative terms.',
+      },
+    },
+  },
+};
+
+// ---------- Objective Function Metadata ----------
+
+export const OBJECTIVE_FUNCTION_INFO: Record<ObjectiveFunction, {
+  name: string;
+  description: string;
+  metrics: string[];
+}> = {
+  capacity: {
+    name: 'Capacity Maximization',
+    description: 'Maximize probability of meeting MW obligation. Primary focus on hitting targets.',
+    metrics: ['delivered_kw', 'interval_hit_rate'],
+  },
+  risk_minimization: {
+    name: 'Risk Minimization',
+    description: 'Minimize variance and probability of failure. Smooth, reliable performance.',
+    metrics: ['variance_kw', 'dropoff_rate', 'p_fail'],
+  },
+  efficiency: {
+    name: 'Efficiency',
+    description: 'Maximize value per unit of customer or asset cost. Sustainable long-term.',
+    metrics: ['kw_per_soc', 'kw_per_comfort_minute'],
+  },
+  regret_minimization: {
+    name: 'Regret Minimization',
+    description: 'Avoid worst-case outcomes. Protect against catastrophic failures.',
+    metrics: ['comfort_violations', 'mid_event_failures'],
+  },
+  learning_oriented: {
+    name: 'Learning Oriented',
+    description: 'Improve future dispatch by reducing uncertainty about asset behavior.',
+    metrics: ['uncertainty_reduction', 'model_error_delta'],
+  },
+};
+
+// ---------- Selection Ordering Metadata ----------
+
+export const SELECTION_ORDERING_INFO: Record<SelectionOrdering, {
+  name: string;
+  description: string;
+  category: SelectionCategory;
+}> = {
+  // Asset Type Based
+  batteries_first: {
+    name: 'Batteries First',
+    description: 'Prioritize battery discharge. Fast response, limited duration.',
+    category: 'asset_type_based',
+  },
+  hvac_first: {
+    name: 'HVAC First',
+    description: 'Lead with thermostat adjustments. Slower but sustained response.',
+    category: 'asset_type_based',
+  },
+  high_load_reduction_first: {
+    name: 'High Load Reduction First',
+    description: 'Prioritize EV and Fleet charging reduction. High impact, flexible.',
+    category: 'asset_type_based',
+  },
+  balanced_weighting: {
+    name: 'Balanced Weighting',
+    description: 'Equal weighting across all asset types. Diversified approach.',
+    category: 'asset_type_based',
+  },
+  // Performance Based
+  highest_trust_score: {
+    name: 'Highest Trust Score',
+    description: 'Prioritize assets with best historical reliability.',
+    category: 'performance_based',
+  },
+  lowest_variance: {
+    name: 'Lowest Variance',
+    description: 'Prioritize assets with most predictable performance.',
+    category: 'performance_based',
+  },
+  best_historical_delivery: {
+    name: 'Best Historical Delivery',
+    description: 'Prioritize assets that consistently deliver expected kW.',
+    category: 'performance_based',
+  },
+  // State Based
+  highest_headroom: {
+    name: 'Highest Headroom',
+    description: 'Prioritize assets with most capacity available right now.',
+    category: 'state_based',
+  },
+  lowest_marginal_comfort_cost: {
+    name: 'Lowest Comfort Cost',
+    description: 'Prioritize assets where dispatch causes least customer impact.',
+    category: 'state_based',
+  },
+  highest_soc_buffer: {
+    name: 'Highest SOC Buffer',
+    description: 'Prioritize batteries/EVs with most energy above reserve.',
+    category: 'state_based',
+  },
+  // Fairness Based
+  least_recently_dispatched: {
+    name: 'Least Recently Dispatched',
+    description: 'Spread dispatch load across assets over time.',
+    category: 'fairness_based',
+  },
+  round_robin: {
+    name: 'Round Robin',
+    description: 'Cycle through assets in rotation.',
+    category: 'fairness_based',
+  },
+  fatigue_balanced: {
+    name: 'Fatigue Balanced',
+    description: 'Prioritize assets with lowest accumulated fatigue.',
+    category: 'fairness_based',
+  },
+};
+
+// ---------- Risk Posture Metadata ----------
+
+export const RISK_POSTURE_INFO: Record<RiskPosture, {
+  name: string;
+  description: string;
+  characteristics: string[];
+}> = {
+  risk_averse: {
+    name: 'Risk Averse',
+    description: 'High reserves, conservative dispatch. Prioritize reliability over performance.',
+    characteristics: ['High reserve margin', 'Early dispatch', 'Slow ramp-up', 'Buffer capacity'],
+  },
+  neutral: {
+    name: 'Neutral',
+    description: 'Balanced risk and reward. Standard dispatch behavior.',
+    characteristics: ['Moderate reserves', 'Standard timing', 'Balanced approach'],
+  },
+  opportunity_seeking: {
+    name: 'Opportunity Seeking',
+    description: 'Calculated risk for higher upside. Aggressive dispatch with lower reserves.',
+    characteristics: ['Lower reserves', 'Delayed dispatch', 'Fast ramp-up', 'Higher peak performance'],
+  },
+  deadline_aware: {
+    name: 'Deadline Aware',
+    description: 'Aggressiveness increases as time remaining shrinks. Dynamic risk adjustment.',
+    characteristics: ['Time-weighted penalties', 'Conservative early, aggressive late', 'Adaptive reserves'],
+  },
+};
+
+// ---------- Feedback Mode Metadata ----------
+
+export const FEEDBACK_MODE_INFO: Record<FeedbackMode, {
+  name: string;
+  description: string;
+}> = {
+  none: {
+    name: 'No Feedback',
+    description: 'Open-loop dispatch. No adaptation during event.',
+  },
+  closed_loop: {
+    name: 'Closed Loop',
+    description: 'Adjust dispatch in real-time based on observed vs. target performance.',
+  },
+  post_event_learning: {
+    name: 'Post-Event Learning',
+    description: 'Update asset models and trust scores after events complete.',
+  },
+};
+
+// ---------- Selection Category Metadata ----------
+
+export const SELECTION_CATEGORY_INFO: Record<SelectionCategory, {
+  name: string;
+  description: string;
+}> = {
+  asset_type_based: {
+    name: 'Asset Type Based',
+    description: 'Order assets by their type (batteries, HVAC, EVs, etc.)',
+  },
+  performance_based: {
+    name: 'Performance Based',
+    description: 'Order assets by historical reliability and delivery metrics.',
+  },
+  state_based: {
+    name: 'State Based',
+    description: 'Order assets by current state (headroom, SOC, comfort margin).',
+  },
+  fairness_based: {
+    name: 'Fairness Based',
+    description: 'Order assets to distribute dispatch burden fairly over time.',
+  },
+};
+
+// ---------- Legacy Sub-Strategy Metadata (kept for compatibility) ----------
 
 export const RULE_BASED_SUB_STRATEGIES: Record<RuleBasedSubStrategy, {
   name: string;
@@ -420,7 +991,7 @@ export const STOCHASTIC_SUB_STRATEGIES: Record<StochasticSubStrategy, {
   },
 };
 
-// Helper to get sub-strategies for a given top-level strategy
+// Helper to get sub-strategies for a given top-level strategy (legacy)
 export function getSubStrategiesForStrategy(strategy: DispatchStrategy): Record<string, { name: string; description: string }> {
   switch (strategy) {
     case 'rule_based':
@@ -432,7 +1003,7 @@ export function getSubStrategiesForStrategy(strategy: DispatchStrategy): Record<
   }
 }
 
-// Get default sub-strategy for a top-level strategy
+// Get default sub-strategy for a top-level strategy (legacy)
 export function getDefaultSubStrategy(strategy: DispatchStrategy): SubStrategy {
   switch (strategy) {
     case 'rule_based':
@@ -442,6 +1013,25 @@ export function getDefaultSubStrategy(strategy: DispatchStrategy): SubStrategy {
     case 'stochastic':
       return 'risk_averse';
   }
+}
+
+// ---------- Strategy Helpers ----------
+
+// Get orderings for a specific category
+export function getOrderingsForCategory(category: SelectionCategory): SelectionOrdering[] {
+  return (Object.entries(SELECTION_ORDERING_INFO) as [SelectionOrdering, typeof SELECTION_ORDERING_INFO[SelectionOrdering]][])
+    .filter(([_, info]) => info.category === category)
+    .map(([key]) => key);
+}
+
+// Get subtypes for a specific decision framework
+export function getSubtypesForFramework(framework: DecisionFramework): Record<string, { name: string; description: string }> {
+  return DECISION_FRAMEWORK_INFO[framework].subtypes;
+}
+
+// Validate that a subtype belongs to its framework
+export function isValidSubtypeForFramework(framework: DecisionFramework, subtype: FrameworkSubtype): boolean {
+  return subtype in DECISION_FRAMEWORK_INFO[framework].subtypes;
 }
 
 // ---------- Enhanced Final Score ----------

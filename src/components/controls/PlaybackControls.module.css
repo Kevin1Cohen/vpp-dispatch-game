@@ -4,8 +4,8 @@
   justify-content: center;
   gap: 2rem;
   padding: 1rem 1.5rem;
-  background: #1e293b;
-  border: 1px solid #334155;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 16px;
 }
 
@@ -50,7 +50,9 @@
 }
 
 .controlButton.primary:hover:not(:disabled) {
-  transform: scale(1.05);
+  background: linear-gradient(135deg, #1e293b 0%, #1e293b 100%);
+  border: 1px solid #475569;
+  color: #e2e8f0;
 }
 
 .speedControls {

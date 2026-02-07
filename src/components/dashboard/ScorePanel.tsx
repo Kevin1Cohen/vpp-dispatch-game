@@ -6,6 +6,17 @@
 import { SimulationState } from '../../game/types';
 import styles from './ScorePanel.module.css';
 
+// Helper to format kW as MW or GW
+function formatPower(kw: number): string {
+  const absKw = Math.abs(kw);
+  if (absKw >= 1000000) {
+    return `${(kw / 1000000).toFixed(2)} GW`;
+  } else if (absKw >= 1000) {
+    return `${(kw / 1000).toFixed(1)} MW`;
+  }
+  return `${kw.toFixed(0)} kW`;
+}
+
 interface ScorePanelProps {
   state: SimulationState;
 }
@@ -82,7 +93,7 @@ export function ScorePanel({ state }: ScorePanelProps) {
                 }}
               >
                 {latestResult.shortfall_kw > 0
-                  ? `-${latestResult.shortfall_kw.toFixed(0)} kW`
+                  ? `-${formatPower(latestResult.shortfall_kw)}`
                   : 'None'}
               </span>
             </div>

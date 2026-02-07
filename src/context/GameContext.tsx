@@ -12,9 +12,18 @@ import {
   SubStrategy,
   AssetType,
   GameConfig,
-  AggressivenessSettings,
-  DEFAULT_AGGRESSIVENESS,
+  DispatchIntensitySettings,
+  DEFAULT_DISPATCH_INTENSITY,
   getDefaultSubStrategy,
+  getDefaultIntensityForStrategy,
+  StrategyConfig,
+  DEFAULT_STRATEGY_CONFIG,
+  DecisionFramework,
+  FrameworkSubtype,
+  ObjectiveFunction,
+  SelectionOrdering,
+  RiskPosture,
+  FeedbackMode,
 } from '../game/types';
 import { generateScenario, ScenarioGeneratorConfig } from '../game/ScenarioGenerator';
 import { SimulationEngine, calculateFinalScore } from '../game/SimulationEngine';
@@ -45,8 +54,8 @@ type GameAction =
   | { type: 'SET_DIFFICULTY'; difficulty: DifficultyLevel }
   | { type: 'SET_STRATEGY'; strategy: DispatchStrategy }
   | { type: 'SET_SUB_STRATEGY'; subStrategy: SubStrategy }
-  | { type: 'SET_AGGRESSIVENESS'; assetType: AssetType; value: number }
-  | { type: 'SET_ALL_AGGRESSIVENESS'; settings: AggressivenessSettings }
+  | { type: 'SET_DISPATCH_INTENSITY'; assetType: AssetType; value: number }
+  | { type: 'SET_ALL_DISPATCH_INTENSITY'; settings: DispatchIntensitySettings }
   | { type: 'TOGGLE_ASSET_TYPE'; assetType: AssetType }
   | { type: 'SET_ASSET_COUNT'; assetType: AssetType; count: number }
   | { type: 'GENERATE_SCENARIO' }
@@ -54,15 +63,28 @@ type GameAction =
   | { type: 'UPDATE_SIMULATION'; state: SimulationState }
   | { type: 'SET_SPEED'; speed: number }
   | { type: 'SIMULATION_COMPLETE'; state: SimulationState }
-  | { type: 'RESET_GAME' };
+  | { type: 'RESET_GAME' }
+  // New composable strategy actions
+  | { type: 'SET_STRATEGY_CONFIG'; config: StrategyConfig }
+  | { type: 'SET_DECISION_FRAMEWORK'; framework: DecisionFramework; subtype: FrameworkSubtype }
+  | { type: 'SET_OBJECTIVE'; objective: ObjectiveFunction }
+  | { type: 'SET_SELECTION_ORDERINGS'; orderings: SelectionOrdering[] }
+  | { type: 'SET_RISK_POSTURE'; riskPosture: RiskPosture }
+  | { type: 'SET_FEEDBACK_MODE'; feedbackMode: FeedbackMode };
 
 // ---------- Initial State ----------
 
 const initialGameConfig: GameConfig = {
   difficulty: 'medium',
+  // New composable strategy system
+  strategyConfig: { ...DEFAULT_STRATEGY_CONFIG },
+  // Dispatch intensity: initialized from strategy config
+  dispatchIntensity: getDefaultIntensityForStrategy(DEFAULT_STRATEGY_CONFIG),
+  // Legacy fields (kept for backward compatibility)
   strategy: 'rule_based',
   subStrategy: 'balanced',
-  aggressiveness: { ...DEFAULT_AGGRESSIVENESS },
+  aggressiveness: getDefaultIntensityForStrategy(DEFAULT_STRATEGY_CONFIG),
+  // Asset configuration
   asset_types: ['hvac_resi', 'battery_resi', 'ev_resi'],
   asset_counts: {
     hvac_resi: 50,
@@ -112,11 +134,16 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         gameConfig: { ...state.gameConfig, subStrategy: action.subStrategy },
       };
 
-    case 'SET_AGGRESSIVENESS':
+    case 'SET_DISPATCH_INTENSITY':
       return {
         ...state,
         gameConfig: {
           ...state.gameConfig,
+          dispatchIntensity: {
+            ...state.gameConfig.dispatchIntensity,
+            [action.assetType]: action.value,
+          },
+          // Keep aggressiveness in sync for backward compatibility
           aggressiveness: {
             ...state.gameConfig.aggressiveness,
             [action.assetType]: action.value,
@@ -124,11 +151,12 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         },
       };
 
-    case 'SET_ALL_AGGRESSIVENESS':
+    case 'SET_ALL_DISPATCH_INTENSITY':
       return {
         ...state,
         gameConfig: {
           ...state.gameConfig,
+          dispatchIntensity: action.settings,
           aggressiveness: action.settings,
         },
       };
@@ -160,10 +188,11 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       };
 
     case 'GENERATE_SCENARIO': {
+      // Don't pass assetCounts - let the scenario generator use the
+      // total_assets from difficulty presets and distribute evenly
       const config: ScenarioGeneratorConfig = {
         difficulty: state.gameConfig.difficulty,
         assetTypes: state.gameConfig.asset_types,
-        assetCounts: state.gameConfig.asset_counts,
       };
       const scenario = generateScenario(config);
       return { ...state, scenario };
@@ -194,6 +223,81 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         gameConfig: state.gameConfig, // Keep config
       };
 
+    // New composable strategy actions
+    case 'SET_STRATEGY_CONFIG': {
+      const newIntensity = getDefaultIntensityForStrategy(action.config);
+      return {
+        ...state,
+        gameConfig: {
+          ...state.gameConfig,
+          strategyConfig: action.config,
+          dispatchIntensity: newIntensity,
+          aggressiveness: newIntensity,
+        },
+      };
+    }
+
+    case 'SET_DECISION_FRAMEWORK':
+      return {
+        ...state,
+        gameConfig: {
+          ...state.gameConfig,
+          strategyConfig: {
+            ...state.gameConfig.strategyConfig,
+            decisionFramework: action.framework,
+            frameworkSubtype: action.subtype,
+          },
+        },
+      };
+
+    case 'SET_OBJECTIVE':
+      return {
+        ...state,
+        gameConfig: {
+          ...state.gameConfig,
+          strategyConfig: {
+            ...state.gameConfig.strategyConfig,
+            objective: action.objective,
+          },
+        },
+      };
+
+    case 'SET_SELECTION_ORDERINGS':
+      return {
+        ...state,
+        gameConfig: {
+          ...state.gameConfig,
+          strategyConfig: {
+            ...state.gameConfig.strategyConfig,
+            selectionOrderings: action.orderings,
+          },
+        },
+      };
+
+    case 'SET_RISK_POSTURE':
+      return {
+        ...state,
+        gameConfig: {
+          ...state.gameConfig,
+          strategyConfig: {
+            ...state.gameConfig.strategyConfig,
+            riskPosture: action.riskPosture,
+          },
+        },
+      };
+
+    case 'SET_FEEDBACK_MODE':
+      return {
+        ...state,
+        gameConfig: {
+          ...state.gameConfig,
+          strategyConfig: {
+            ...state.gameConfig.strategyConfig,
+            feedbackMode: action.feedbackMode,
+          },
+        },
+      };
+
     default:
       return state;
   }
@@ -210,10 +314,18 @@ interface GameContextType {
   setDifficulty: (difficulty: DifficultyLevel) => void;
   setStrategy: (strategy: DispatchStrategy) => void;
   setSubStrategy: (subStrategy: SubStrategy) => void;
-  setAggressiveness: (assetType: AssetType, value: number) => void;
-  setAllAggressiveness: (settings: AggressivenessSettings) => void;
+  // Dispatch intensity (real-time control)
+  setDispatchIntensity: (assetType: AssetType, value: number) => void;
+  setAllDispatchIntensity: (settings: DispatchIntensitySettings) => void;
   toggleAssetType: (assetType: AssetType) => void;
   setAssetCount: (assetType: AssetType, count: number) => void;
+  // New composable strategy config
+  setStrategyConfig: (config: StrategyConfig) => void;
+  setDecisionFramework: (framework: DecisionFramework, subtype: FrameworkSubtype) => void;
+  setObjective: (objective: ObjectiveFunction) => void;
+  setSelectionOrderings: (orderings: SelectionOrdering[]) => void;
+  setRiskPosture: (riskPosture: RiskPosture) => void;
+  setFeedbackMode: (feedbackMode: FeedbackMode) => void;
   // Scenario
   generateNewScenario: () => void;
   // Simulation
@@ -252,19 +364,49 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SET_SUB_STRATEGY', subStrategy });
   }, []);
 
-  const setAggressiveness = useCallback((assetType: AssetType, value: number) => {
-    dispatch({ type: 'SET_AGGRESSIVENESS', assetType, value });
-    // Update the engine's aggressiveness if it exists
+  const setDispatchIntensity = useCallback((assetType: AssetType, value: number) => {
+    dispatch({ type: 'SET_DISPATCH_INTENSITY', assetType, value });
+    // Update engine in real-time if running
     if (engineRef.current) {
-      engineRef.current.updateAggressiveness(assetType, value);
+      engineRef.current.updateDispatchIntensity(assetType, value);
     }
   }, []);
 
-  const setAllAggressiveness = useCallback((settings: AggressivenessSettings) => {
-    dispatch({ type: 'SET_ALL_AGGRESSIVENESS', settings });
+  const setAllDispatchIntensity = useCallback((settings: DispatchIntensitySettings) => {
+    dispatch({ type: 'SET_ALL_DISPATCH_INTENSITY', settings });
+    // Update engine in real-time if running
     if (engineRef.current) {
-      engineRef.current.updateAllAggressiveness(settings);
+      engineRef.current.updateAllDispatchIntensity(settings);
     }
+  }, []);
+
+  // New composable strategy methods
+  const setStrategyConfig = useCallback((config: StrategyConfig) => {
+    dispatch({ type: 'SET_STRATEGY_CONFIG', config });
+  }, []);
+
+  const setDecisionFramework = useCallback((framework: DecisionFramework, subtype: FrameworkSubtype) => {
+    dispatch({ type: 'SET_DECISION_FRAMEWORK', framework, subtype });
+  }, []);
+
+  const setObjective = useCallback((objective: ObjectiveFunction) => {
+    dispatch({ type: 'SET_OBJECTIVE', objective });
+  }, []);
+
+  const setSelectionOrderings = useCallback((orderings: SelectionOrdering[]) => {
+    dispatch({ type: 'SET_SELECTION_ORDERINGS', orderings });
+  }, []);
+
+  const setRiskPosture = useCallback((riskPosture: RiskPosture) => {
+    dispatch({ type: 'SET_RISK_POSTURE', riskPosture });
+    // Update engine if running
+    if (engineRef.current) {
+      engineRef.current.updateRiskPosture(riskPosture);
+    }
+  }, []);
+
+  const setFeedbackMode = useCallback((feedbackMode: FeedbackMode) => {
+    dispatch({ type: 'SET_FEEDBACK_MODE', feedbackMode });
   }, []);
 
   const toggleAssetType = useCallback((assetType: AssetType) => {
@@ -296,16 +438,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (!engineRef.current) {
       engineRef.current = new SimulationEngine(
         state.scenario,
-        state.gameConfig.strategy,
-        state.gameConfig.subStrategy,
-        state.gameConfig.aggressiveness,
+        state.gameConfig.strategyConfig,
+        state.gameConfig.difficulty,
         handleUpdate,
-        handleComplete
+        handleComplete,
+        state.gameConfig.dispatchIntensity
       );
     }
     engineRef.current.setSpeed(state.simulationSpeed);
     engineRef.current.start();
-  }, [state.scenario, state.gameConfig.strategy, state.gameConfig.subStrategy, state.gameConfig.aggressiveness, state.simulationSpeed, handleUpdate, handleComplete]);
+  }, [state.scenario, state.gameConfig.strategyConfig, state.gameConfig.difficulty, state.gameConfig.dispatchIntensity, state.simulationSpeed, handleUpdate, handleComplete]);
 
   const pauseSimulation = useCallback(() => {
     engineRef.current?.pause();
@@ -314,18 +456,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const resetSimulation = useCallback(() => {
     if (engineRef.current) {
       engineRef.current.reset();
+      // Also update intensity in case it changed
+      engineRef.current.updateAllDispatchIntensity(state.gameConfig.dispatchIntensity);
     } else if (state.scenario) {
       engineRef.current = new SimulationEngine(
         state.scenario,
-        state.gameConfig.strategy,
-        state.gameConfig.subStrategy,
-        state.gameConfig.aggressiveness,
+        state.gameConfig.strategyConfig,
+        state.gameConfig.difficulty,
         handleUpdate,
-        handleComplete
+        handleComplete,
+        state.gameConfig.dispatchIntensity
       );
       dispatch({ type: 'UPDATE_SIMULATION', state: engineRef.current.getState() });
     }
-  }, [state.scenario, state.gameConfig.strategy, state.gameConfig.subStrategy, state.gameConfig.aggressiveness, handleUpdate, handleComplete]);
+  }, [state.scenario, state.gameConfig.strategyConfig, state.gameConfig.difficulty, state.gameConfig.dispatchIntensity, handleUpdate, handleComplete]);
 
   const setSimulationSpeed = useCallback((speed: number) => {
     dispatch({ type: 'SET_SPEED', speed });
@@ -351,10 +495,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setDifficulty,
     setStrategy,
     setSubStrategy,
-    setAggressiveness,
-    setAllAggressiveness,
+    setDispatchIntensity,
+    setAllDispatchIntensity,
     toggleAssetType,
     setAssetCount,
+    // New composable strategy methods
+    setStrategyConfig,
+    setDecisionFramework,
+    setObjective,
+    setSelectionOrderings,
+    setRiskPosture,
+    setFeedbackMode,
+    // Scenario & simulation
     generateNewScenario,
     startSimulation,
     pauseSimulation,

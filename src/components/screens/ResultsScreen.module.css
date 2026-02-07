@@ -84,6 +84,12 @@
   align-items: flex-start;
 }
 
+.primaryStatValueRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
 .primaryStatValue {
   font-size: 2rem;
   font-weight: 800;
@@ -93,10 +99,9 @@
 }
 
 .primaryStatUnit {
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 600;
-  color: #64748b;
-  margin-left: 0.25rem;
+  color: #94a3b8;
 }
 
 .primaryStatLabel {
@@ -321,7 +326,7 @@
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 12px;
-  padding: 1rem;
+  padding: 1.25rem;
   margin-bottom: 1.5rem;
   text-align: left;
 }
@@ -330,7 +335,7 @@
   font-size: 0.8rem;
   font-weight: 600;
   color: #64748b;
-  margin: 0 0 0.75rem;
+  margin: 0 0 1rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -356,6 +361,59 @@
   font-size: 0.8rem;
   font-weight: 600;
   color: #f8fafc;
+}
+
+/* Strategy Configuration Grid */
+.strategyGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.strategyItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 8px;
+  border: 1px solid #334155;
+}
+
+.strategyItem:last-child {
+  grid-column: span 2;
+}
+
+.strategyLabel {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.strategyValue {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.strategySubValue {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.orderingsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.orderingItem {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  background: #334155;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
 }
 
 /* Actions */
